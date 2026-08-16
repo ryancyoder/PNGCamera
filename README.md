@@ -137,6 +137,17 @@ app's Application Support directory and are only shared when you share them.
 Camera, microphone, speech recognition, and photo-library-add permissions are
 each requested at the point they are first used.
 
+## Planned features
+
+- **Pre-loaded shape masks.** Crop the capture into a predefined shape —
+  circle, rounded square, ellipse, hexagon, badge, banner, and similar — instead
+  of (or on top of) the subject cutout. The shape mask would multiply into the
+  existing alpha channel, so a circular crop of a cutout keeps the transparent
+  background outside the subject as well as outside the circle. Ships with a
+  built-in shape set, picked from the capture screen alongside the parsing
+  script and previewed live over the checkerboard, with an aspect-fit or
+  aspect-fill choice for how the frame maps into the shape.
+
 ## Known limitations
 
 - Subject isolation quality is whatever Vision produces; there is no manual
