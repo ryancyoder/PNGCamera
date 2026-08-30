@@ -594,6 +594,72 @@ input[type="range"]::-moz-range-thumb {
 .row { display: grid; gap: 8px; }
 .row-2 { grid-template-columns: 1fr 1fr; }
 
+/* --------------------------------------------------------------- sight */
+
+.sight {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: #000;
+  --sight-colour: var(--accent);
+}
+.sight[hidden] { display: none; }
+#sight-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+}
+.sight-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto 1fr auto auto;
+  padding: max(14px, env(safe-area-inset-top)) 14px max(14px, env(safe-area-inset-bottom));
+  gap: 12px;
+}
+.sight-top { display: grid; gap: 2px; justify-items: center; text-shadow: 0 1px 6px rgba(0,0,0,0.9); }
+.sight-target {
+  font: 700 13px/1 ui-monospace, Menlo, monospace;
+  letter-spacing: 0.14em;
+  color: var(--sight-colour);
+}
+.sight-shots { font-size: 12px; color: rgba(255,255,255,0.8); }
+
+.sight-cross { place-self: center; position: relative; width: 128px; height: 128px; }
+.sight-cross .sight-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.35);
+  /* The filled arc is the hold counting down to an automatic shot. */
+  background: conic-gradient(var(--sight-colour) calc(var(--progress, 0) * 360deg), transparent 0);
+  -webkit-mask: radial-gradient(circle, transparent 58%, #000 60%);
+  mask: radial-gradient(circle, transparent 58%, #000 60%);
+}
+.sight-cross .sight-h, .sight-cross .sight-v {
+  position: absolute;
+  background: var(--sight-colour);
+  box-shadow: 0 0 6px rgba(0,0,0,0.9);
+}
+.sight-cross .sight-h { left: 18%; right: 18%; top: 50%; height: 2px; transform: translateY(-1px); }
+.sight-cross .sight-v { top: 18%; bottom: 18%; left: 50%; width: 2px; transform: translateX(-1px); }
+.sight.is-armed .sight-cross .sight-h,
+.sight.is-armed .sight-cross .sight-v { opacity: 1; }
+.sight-cross .sight-h, .sight-cross .sight-v { opacity: 0.45; }
+
+.sight-angle {
+  place-self: center;
+  font: 700 44px/1 ui-monospace, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  text-shadow: 0 2px 10px rgba(0,0,0,0.9);
+}
+.sight-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.sight-actions .btn { background: rgba(10,16,23,0.82); backdrop-filter: blur(10px); }
+
 /* -------------------------------------------------------------- survey */
 
 .survey {
@@ -1327,6 +1393,28 @@ input[type="range"]::-moz-range-thumb {
       </section>
     </div>
   </aside>
+</div>
+
+<!-- Sighting: a live preview to aim through, with the tilt read off the device.
+     The camera measures nothing; it is what lets you know you were on the eave. -->
+<div class="sight" id="sight" hidden>
+  <video id="sight-video" playsinline muted></video>
+  <div class="sight-overlay">
+    <div class="sight-top">
+      <span class="sight-target" id="sight-target">TARGET</span>
+      <span class="sight-shots" id="sight-shots">hold steady to shoot</span>
+    </div>
+    <div class="sight-cross" id="sight-dwell" aria-hidden="true">
+      <span class="sight-ring"></span>
+      <span class="sight-h"></span>
+      <span class="sight-v"></span>
+    </div>
+    <div class="sight-angle" id="sight-angle">—</div>
+    <div class="sight-actions">
+      <button class="btn" id="sight-done">Done</button>
+      <button class="btn btn-primary" id="sight-shoot">Shoot now</button>
+    </div>
+  </div>
 </div>
 
 <input type="file" id="file-aerial" accept="image/*" hidden>
@@ -5088,6 +5176,205 @@ class TiltSensor {
 
 
 // ======================================================================
+// src/ui/SightView.js
+// ======================================================================
+// SightView.js
+//
+// The sighting half of a grade shot: a live camera preview with a crosshair to
+// aim, and the tilt read off the device as you hold it there.
+//
+// The camera is not measuring anything — the angle comes from the tilt sensor.
+// What the preview is for is aiming: a number with no picture behind it gives
+// you no way to know you were on the eave rather than the gutter, and no way to
+// tell afterwards which of five identical "Target 3" readings was which. Upright
+// makes the same point the hard way; a yard full of unlabelled pins is
+// impossible to place later.
+//
+// Shots fire on DWELL, as they do in Upright: hold the crosshair steady and it
+// takes the shot itself, so you are not fumbling for a button while aiming a
+// tablet at a roof. After a shot it disarms until you move off the target, or
+// one long hold would machine-gun the same point.
+
+
+
+/** Hold within this many degrees to count as steady. */
+const DWELL_TOLERANCE_DEG = 0.6;
+/** How long to hold before the shot fires. */
+const DWELL_MS = 900;
+/** Move off by this much to arm the next shot. */
+const REARM_DEG = 1.5;
+
+class SightView {
+  constructor(root, { survey, tilt, onShot, onClose } = {}) {
+    this.root = root;
+    this.survey = survey;
+    this.tilt = tilt;
+    this.onShot = onShot;
+    this.onClose = onClose;
+
+    this.video = root.querySelector('#sight-video');
+    this.targetId = null;
+    this.stream = null;
+    this.armed = true;
+    this._dwellFrom = null;
+    this._dwellAngle = null;
+    this._lastShotAngle = null;
+    this._raf = null;
+
+    root.querySelector('#sight-shoot').onclick = () => this.shoot();
+    root.querySelector('#sight-done').onclick = () => this.close();
+  }
+
+  /**
+   * Why the camera cannot run here, or null when it can be tried. Same two
+   * gates as the motion sensor, and just as silent when they are unmet.
+   */
+  get blockedReason() {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      return 'This browser offers no camera.';
+    }
+    if (typeof window !== 'undefined' && !window.isSecureContext) {
+      return 'The camera needs https. Open the app at an https address.';
+    }
+    if (typeof window !== 'undefined' && window.top !== window.self) {
+      return 'The camera is blocked inside an embedded page. Open the app at its own address.';
+    }
+    return null;
+  }
+
+  /**
+   * Open the sight on a target.
+   * @returns {Promise<{ok:boolean, reason?:string}>}
+   */
+  async open(targetId) {
+    const blocked = this.blockedReason;
+    if (blocked) return { ok: false, reason: blocked };
+
+    const tiltResult = await this.tilt.start();
+    if (!tiltResult.ok) return tiltResult;
+
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false,
+      });
+    } catch (err) {
+      return {
+        ok: false,
+        reason:
+          err?.name === 'NotAllowedError'
+            ? 'Camera access was declined. Allow it in Safari, or type the angle.'
+            : 'The camera could not be opened. Type the angle instead.',
+      };
+    }
+
+    this.video.srcObject = this.stream;
+    this.video.setAttribute('playsinline', '');
+    this.video.muted = true;
+    try {
+      await this.video.play();
+    } catch {
+      // Autoplay refusal is not fatal: the stream is attached and iOS starts it
+      // on the first touch. Nothing here depends on the frames.
+    }
+
+    this.targetId = targetId;
+    this.armed = true;
+    this._dwellFrom = null;
+    this._lastShotAngle = null;
+    this.root.hidden = false;
+    this._paint();
+    this._loop();
+    return { ok: true };
+  }
+
+  close() {
+    cancelAnimationFrame(this._raf);
+    this._raf = null;
+    // Release the camera outright. iOS shows its recording indicator for an
+    // open track whether or not anything is being read from it.
+    if (this.stream) {
+      for (const track of this.stream.getTracks()) track.stop();
+      this.stream = null;
+    }
+    this.video.srcObject = null;
+    this.root.hidden = true;
+    this.targetId = null;
+    this.onClose?.();
+  }
+
+  get isOpen() {
+    return !this.root.hidden;
+  }
+
+  /** Record the current reading against the open target. */
+  shoot() {
+    const reading = this.tilt.capture();
+    if (!reading || this.targetId == null) return null;
+    this.survey.addShot(this.targetId, reading.angle);
+    this._lastShotAngle = reading.angle;
+    this.armed = false;
+    this._dwellFrom = null;
+    this.onShot?.(this.targetId, reading);
+    this._paint();
+    return reading;
+  }
+
+  _loop() {
+    this._raf = requestAnimationFrame(() => {
+      this._tick();
+      if (this.isOpen) this._loop();
+    });
+  }
+
+  _tick() {
+    const angle = this.tilt.angle;
+    if (angle == null) return;
+
+    // Re-arm once you have moved off the point you just shot.
+    if (!this.armed && this._lastShotAngle != null &&
+        Math.abs(angle - this._lastShotAngle) > REARM_DEG) {
+      this.armed = true;
+    }
+
+    if (!this.armed) {
+      this._dwellFrom = null;
+    } else if (this._dwellAngle == null || Math.abs(angle - this._dwellAngle) > DWELL_TOLERANCE_DEG) {
+      // Drifted: start the hold again from here.
+      this._dwellAngle = angle;
+      this._dwellFrom = performance.now();
+    } else if (this._dwellFrom != null && performance.now() - this._dwellFrom >= DWELL_MS) {
+      this.shoot();
+    }
+    this._paint();
+  }
+
+  _paint() {
+    const spec = this.targetId ? SiteSurvey.spec(this.targetId) : null;
+    const colour = this.targetId ? PIN_COLOURS[this.targetId] : '#8fe9ff';
+    const angle = this.tilt.angle;
+    const shots = this.targetId ? this.survey.point(this.targetId).shots.length : 0;
+
+    this.root.style.setProperty('--sight-colour', colour);
+    this.root.querySelector('#sight-target').textContent = spec ? spec.name.toUpperCase() : '';
+    this.root.querySelector('#sight-angle').textContent =
+      angle == null ? '—' : `${angle >= 0 ? '+' : ''}${angle.toFixed(1)}°`;
+    this.root.querySelector('#sight-shots').textContent =
+      shots ? `${shots} shot${shots === 1 ? '' : 's'} taken` : 'hold steady to shoot';
+
+    // A ring that fills while the hold counts down, so the automatic shot is
+    // something you can see coming rather than a surprise.
+    const progress =
+      this.armed && this._dwellFrom != null
+        ? Math.min(1, (performance.now() - this._dwellFrom) / DWELL_MS)
+        : 0;
+    this.root.querySelector('#sight-dwell').style.setProperty('--progress', String(progress));
+    this.root.classList.toggle('is-armed', this.armed);
+  }
+}
+
+
+// ======================================================================
 // src/ui/ExportManager.js
 // ======================================================================
 // ExportManager.js
@@ -5297,6 +5584,7 @@ class ExportManager {
 // The controller. It owns the state, drives the calibration, and keeps the DOM
 // and the canvas in step. All of the mathematics lives in src/core — this file
 // only decides *when* to ask for it.
+
 
 
 
@@ -5685,14 +5973,28 @@ class App {
     scaleField.onchange = commitScale;
     scaleField.onblur = commitScale;
 
+    this._buildSurveyPoints();
+
+    this.sight = new SightView(this.$('sight'), {
+      survey: this.survey,
+      tilt: this.tilt,
+      onShot: (id, reading) => {
+        this._syncSurvey();
+        const spread = reading.spread == null ? '' : ` · ±${reading.spread.toFixed(2)}° hold`;
+        this._toast(`${SiteSurvey.spec(id).name}: ${reading.angle.toFixed(1)}°${spread}`);
+      },
+      onClose: () => this._syncSurvey(),
+    });
+
     $('btn-tilt').onclick = () => this._startTilt();
     // Say up front when tilt cannot work here, so the typed-angle path is
     // presented as the way to use it rather than as a consolation.
-    const blocked = this.tilt.blockedReason;
+    const blocked = this.tilt.blockedReason ?? this.sight.blockedReason;
     if (blocked) {
-      $('tilt-hint').textContent = blocked;
+      $('tilt-hint').textContent = `${blocked} Type each angle in its box instead — everything else works.`;
       $('btn-tilt').disabled = true;
       $('tilt-readout').textContent = 'type angles';
+      for (const row of this._pointRows.values()) row.shoot.disabled = true;
     }
     $('btn-apply-survey').onclick = () => this._applySurvey();
 
@@ -5706,7 +6008,6 @@ class App {
       this._syncSurvey();
     });
 
-    this._buildSurveyPoints();
   }
 
   /** One block per standard point: place it, shoot it, or type its angle. */
@@ -5831,16 +6132,32 @@ class App {
     el.classList.add('is-live');
   }
 
-  _shoot(id) {
-    const reading = this.tilt.capture();
-    if (!reading) {
-      this._toast('No tilt reading yet — tap Read tilt, or type the angle.', true);
+  /**
+   * Shoot a target. Opens the sight so there is a picture to aim through; a
+   * reading with nothing behind it gives no way to know you were on the eave
+   * rather than the gutter. Where the camera cannot run, fall back to the tilt
+   * alone if that at least is working, and say what is missing if it is not.
+   */
+  async _shoot(id) {
+    // Take the reading NOW, synchronously, at the moment of the press. Opening
+    // the sight is asynchronous — a camera permission prompt can sit there for
+    // seconds — and a reading captured after it would record wherever the iPad
+    // had drifted to, not where it was aimed when the button went down.
+    const atPress = this.tilt.capture();
+
+    const opened = await this.sight.open(id);
+    if (opened.ok) return; // the sight collects its own readings from here
+
+    const reading = atPress;
+    if (reading) {
+      this.survey.addShot(id, reading.angle);
+      this._syncSurvey();
+      const spread = reading.spread == null ? '' : ` · ±${reading.spread.toFixed(2)}° hold`;
+      this._toast(`No camera — ${SiteSurvey.spec(id).name}: ${reading.angle.toFixed(1)}°${spread}`);
       return;
     }
-    this.survey.addShot(id, reading.angle);
-    this._syncSurvey();
-    const spread = reading.spread == null ? '' : ` · ±${reading.spread.toFixed(2)}° hold`;
-    this._toast(`${SiteSurvey.spec(id).name}: ${reading.angle.toFixed(1)}°${spread}`);
+    this._toast(opened.reason, true);
+    this.$('tilt-hint').textContent = `${opened.reason} Type the angle in its box instead.`;
   }
 
   _syncSurvey() {

@@ -133,19 +133,41 @@ and leaving it on the wall pin reads it too low.
   Repeatability is not accuracy: five shots at a mis-placed pin will agree
   beautifully and all be wrong.
 
-### Where the tilt works
+### Sighting through the camera
 
-Motion sensors need two things, and both are silent when missing: an **https**
-page, and one that is **not embedded in someone else's**. A browser delegates
-motion to an iframe only when the embedder asks for it, and most do not — so in
-an embedded page the permission prompt never appears and no events ever arrive.
+Tapping **Shoot** on a target opens a live camera preview with a crosshair. The
+camera measures nothing — the angle still comes off the tilt sensor — but a
+reading with no picture behind it gives you no way to know you were on the eave
+rather than the gutter, and no way to tell afterwards which of five identical
+readings was which.
+
+Shots fire on **dwell**, as they do in Upright: hold the crosshair steady and it
+takes the shot itself, rather than making you fumble for a button while aiming a
+tablet at a roof. A ring fills while the hold counts down, so the automatic shot
+is something you can see coming. After a shot it disarms until you move off the
+target, or one long hold would machine-gun the same point. **Done** releases the
+camera outright — iOS lights its recording indicator for any open track, whether
+or not anything is reading from it.
+
+The reading is taken at the instant the button goes down, not after the camera
+opens: a permission prompt can sit there for seconds, and a reading captured
+afterwards records wherever the iPad drifted to in the meantime.
+
+### Where the camera and the tilt work
+
+The camera and the motion sensors need the same two things, and both are silent
+when missing: an **https** page, and one that is **not embedded in someone
+else's**. A browser delegates camera and motion to an iframe only when the
+embedder asks for it, and most do not — so in an embedded page the permission
+prompt never appears and nothing ever arrives.
 
 The app checks for both up front and says which is missing, rather than leaving
-a button that does nothing. Typed angles work everywhere, so an embedded copy is
-still fully usable for the maths — it just cannot read the iPad.
+buttons that do nothing. Typed angles work everywhere, so an embedded copy is
+still fully usable for the maths — it just cannot aim or read the iPad.
 
-To shoot with the iPad, open the app at its own https address: GitHub Pages off
-this repo, or any static host.
+To sight through the camera, open the app at its own https address: GitHub Pages
+off this repo, or any static host. Opening the single-file build from Files will
+not do it either — `file://` is not a secure context.
 
 ### Why a plan and not a live map
 
@@ -350,6 +372,7 @@ src/core/
 src/ui/
   PhotoView.js              canvas, view transform, pinch/pan/drag gestures
   SitePlanView.js           the plan: aerial backdrop, scale bar, draggable pins
+  SightView.js              camera preview and crosshair; shots fire on dwell
   TiltSensor.js             device orientation -> shot angle, with a dwell average
   OverlayRenderer.js        draws the scene in photo pixel coordinates
   ExportManager.js          composites the export, share sheet / download

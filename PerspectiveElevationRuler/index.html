@@ -546,6 +546,28 @@
   </aside>
 </div>
 
+<!-- Sighting: a live preview to aim through, with the tilt read off the device.
+     The camera measures nothing; it is what lets you know you were on the eave. -->
+<div class="sight" id="sight" hidden>
+  <video id="sight-video" playsinline muted></video>
+  <div class="sight-overlay">
+    <div class="sight-top">
+      <span class="sight-target" id="sight-target">TARGET</span>
+      <span class="sight-shots" id="sight-shots">hold steady to shoot</span>
+    </div>
+    <div class="sight-cross" id="sight-dwell" aria-hidden="true">
+      <span class="sight-ring"></span>
+      <span class="sight-h"></span>
+      <span class="sight-v"></span>
+    </div>
+    <div class="sight-angle" id="sight-angle">—</div>
+    <div class="sight-actions">
+      <button class="btn" id="sight-done">Done</button>
+      <button class="btn btn-primary" id="sight-shoot">Shoot now</button>
+    </div>
+  </div>
+</div>
+
 <input type="file" id="file-aerial" accept="image/*" hidden>
 
 <!-- Export preview. On iPadOS a press-and-hold on the image is the most

@@ -22,6 +22,7 @@ import { ExportManager } from './ExportManager.js';
 import { SiteSurvey, STANDARD_POINTS } from '../core/SiteSurvey.js';
 import { SitePlanView, PIN_COLOURS } from './SitePlanView.js';
 import { TiltSensor } from './TiltSensor.js';
+import { SightView } from './SightView.js';
 
 const STORAGE_KEY = 'perspective-elevation-ruler/v1';
 
@@ -399,14 +400,28 @@ export class App {
     scaleField.onchange = commitScale;
     scaleField.onblur = commitScale;
 
+    this._buildSurveyPoints();
+
+    this.sight = new SightView(this.$('sight'), {
+      survey: this.survey,
+      tilt: this.tilt,
+      onShot: (id, reading) => {
+        this._syncSurvey();
+        const spread = reading.spread == null ? '' : ` · ±${reading.spread.toFixed(2)}° hold`;
+        this._toast(`${SiteSurvey.spec(id).name}: ${reading.angle.toFixed(1)}°${spread}`);
+      },
+      onClose: () => this._syncSurvey(),
+    });
+
     $('btn-tilt').onclick = () => this._startTilt();
     // Say up front when tilt cannot work here, so the typed-angle path is
     // presented as the way to use it rather than as a consolation.
-    const blocked = this.tilt.blockedReason;
+    const blocked = this.tilt.blockedReason ?? this.sight.blockedReason;
     if (blocked) {
-      $('tilt-hint').textContent = blocked;
+      $('tilt-hint').textContent = `${blocked} Type each angle in its box instead — everything else works.`;
       $('btn-tilt').disabled = true;
       $('tilt-readout').textContent = 'type angles';
+      for (const row of this._pointRows.values()) row.shoot.disabled = true;
     }
     $('btn-apply-survey').onclick = () => this._applySurvey();
 
@@ -420,7 +435,6 @@ export class App {
       this._syncSurvey();
     });
 
-    this._buildSurveyPoints();
   }
 
   /** One block per standard point: place it, shoot it, or type its angle. */
@@ -545,16 +559,32 @@ export class App {
     el.classList.add('is-live');
   }
 
-  _shoot(id) {
-    const reading = this.tilt.capture();
-    if (!reading) {
-      this._toast('No tilt reading yet — tap Read tilt, or type the angle.', true);
+  /**
+   * Shoot a target. Opens the sight so there is a picture to aim through; a
+   * reading with nothing behind it gives no way to know you were on the eave
+   * rather than the gutter. Where the camera cannot run, fall back to the tilt
+   * alone if that at least is working, and say what is missing if it is not.
+   */
+  async _shoot(id) {
+    // Take the reading NOW, synchronously, at the moment of the press. Opening
+    // the sight is asynchronous — a camera permission prompt can sit there for
+    // seconds — and a reading captured after it would record wherever the iPad
+    // had drifted to, not where it was aimed when the button went down.
+    const atPress = this.tilt.capture();
+
+    const opened = await this.sight.open(id);
+    if (opened.ok) return; // the sight collects its own readings from here
+
+    const reading = atPress;
+    if (reading) {
+      this.survey.addShot(id, reading.angle);
+      this._syncSurvey();
+      const spread = reading.spread == null ? '' : ` · ±${reading.spread.toFixed(2)}° hold`;
+      this._toast(`No camera — ${SiteSurvey.spec(id).name}: ${reading.angle.toFixed(1)}°${spread}`);
       return;
     }
-    this.survey.addShot(id, reading.angle);
-    this._syncSurvey();
-    const spread = reading.spread == null ? '' : ` · ±${reading.spread.toFixed(2)}° hold`;
-    this._toast(`${SiteSurvey.spec(id).name}: ${reading.angle.toFixed(1)}°${spread}`);
+    this._toast(opened.reason, true);
+    this.$('tilt-hint').textContent = `${opened.reason} Type the angle in its box instead.`;
   }
 
   _syncSurvey() {

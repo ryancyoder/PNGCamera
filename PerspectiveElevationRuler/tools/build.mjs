@@ -29,6 +29,7 @@ const MODULES = [
   'src/ui/OverlayRenderer.js',
   'src/ui/SitePlanView.js',
   'src/ui/TiltSensor.js',
+  'src/ui/SightView.js',
   'src/ui/ExportManager.js',
   'src/ui/App.js',
   'src/main.js',
