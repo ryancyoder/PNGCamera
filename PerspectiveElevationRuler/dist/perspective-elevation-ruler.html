@@ -551,6 +551,59 @@ input[type="range"]::-moz-range-thumb {
 .toast[hidden] { display: none; }
 .toast.is-error { border-color: rgba(255, 107, 107, 0.5); color: #ffc9c9; }
 
+/* --------------------------------------------------------- export sheet */
+
+.sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(3, 6, 10, 0.86);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  display: grid;
+  place-items: center;
+  padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+}
+.sheet[hidden] { display: none; }
+.sheet-inner {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  width: min(880px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6);
+}
+.sheet-head, .sheet-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  flex: none;
+}
+.sheet-head { border-bottom: 1px solid var(--line); justify-content: space-between; }
+.sheet-foot { border-top: 1px solid var(--line); }
+.sheet-foot .btn { flex: 1; text-align: center; line-height: var(--tap); text-decoration: none; }
+.sheet-head strong { display: block; font-size: 14px; }
+.sheet-head em { display: block; font-style: normal; font-size: 12px; color: var(--dim); }
+.sheet-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 14px;
+  background:
+    repeating-conic-gradient(#0d141c 0% 25%, #111a24 0% 50%) 50% / 22px 22px;
+}
+.sheet-body img {
+  display: block;
+  max-width: 100%;
+  margin: 0 auto;
+  border-radius: 6px;
+}
+
 /* ------------------------------------------------------- narrow layouts */
 
 @media (max-width: 900px), (orientation: portrait) and (max-width: 1100px) {
@@ -871,6 +924,26 @@ input[type="range"]::-moz-range-thumb {
 <!-- Hidden file inputs: `capture` opens the iPad camera directly. -->
 <input type="file" id="file-camera" accept="image/*" capture="environment" hidden>
 <input type="file" id="file-library" accept="image/*" hidden>
+
+<!-- Export preview. On iPadOS a press-and-hold on the image is the most
+     reliable route to Save to Photos, and it works where a download link
+     does not (in an embedded frame, for instance). -->
+<div class="sheet" id="export-sheet" hidden>
+  <div class="sheet-inner">
+    <header class="sheet-head">
+      <div>
+        <strong>Elevation ruler image</strong>
+        <em id="export-hint">Press and hold the image to save it to Photos.</em>
+      </div>
+      <button class="btn btn-tiny" id="export-close">Done</button>
+    </header>
+    <div class="sheet-body"><img id="export-image" alt="Photograph with the elevation ruler drawn on it"></div>
+    <footer class="sheet-foot">
+      <a class="btn" id="export-download" download="elevation-ruler.png">Download</a>
+      <button class="btn" id="export-open">Open in new tab</button>
+    </footer>
+  </div>
+</div>
 
 <div class="toast" id="toast" hidden></div>
 
@@ -3139,6 +3212,40 @@ class OverlayRenderer {
 class ExportManager {
   constructor(renderer) {
     this.renderer = renderer;
+    this._hostSaver = undefined;
+  }
+
+  /**
+   * Some hosts embed this page in a frame that is not allowed to start a
+   * download, and offer their own save API instead. Resolve it once, up front,
+   * so the export sheet can offer the route that actually works here rather
+   * than a button that silently does nothing.
+   *
+   * @returns {Promise<{save:Function}|null>} null when the page can just use a
+   *          plain download link, which is the ordinary case.
+   */
+  hostSaver() {
+    if (this._hostSaver === undefined) {
+      const use = globalThis.claude?.use;
+      this._hostSaver = typeof use === 'function'
+        ? Promise.resolve(globalThis.claude.use('downloads')).catch(() => null)
+        : Promise.resolve(null);
+    }
+    return this._hostSaver;
+  }
+
+  /** Human-readable reason a host save did not happen. */
+  static saveErrorMessage(err) {
+    switch (err?.code) {
+      case 'declined':
+        return 'Save cancelled.';
+      case 'too_large':
+        return 'The image is too large to save. Try a smaller photograph.';
+      case 'rate_limited':
+        return 'A save is already in progress. Try again in a moment.';
+      default:
+        return 'The image could not be saved here. Press and hold it to save instead.';
+    }
   }
 
   /**
@@ -3257,35 +3364,36 @@ class ExportManager {
   }
 
   /**
-   * Hand the finished image to the user. On iPadOS the share sheet is the only
-   * route that reaches "Save Image", so try that first and fall back to a
-   * download link (and finally to opening the image in a new tab).
+   * Hand the finished image to the user.
+   *
+   * The share sheet is the direct route to "Save Image" on iPadOS, so it is
+   * tried first. It is not always there — an embedded frame, an older browser,
+   * a desktop — and a download link is not a dependable fallback either, since
+   * embedded pages are commonly blocked from starting downloads. So delivery
+   * never claims success it cannot verify: when sharing is unavailable it
+   * returns the image for the caller to show, and a press-and-hold on that
+   * image saves it anywhere, sandbox or not.
+   *
+   * @returns {Promise<{status:'shared'|'cancelled'|'preview', url?:string, blob?:Blob}>}
    */
   async deliver(canvas, filename = 'elevation-ruler.png') {
     const blob = await this.toBlob(canvas);
     if (!blob) throw new Error('Could not encode the image.');
 
-    const file = new File([blob], filename, { type: 'image/png' });
-    if (navigator.canShare?.({ files: [file] }) && navigator.share) {
+    if (navigator.share) {
       try {
-        await navigator.share({ files: [file], title: 'Perspective Elevation Ruler' });
-        return 'shared';
+        const file = new File([blob], filename, { type: 'image/png' });
+        if (navigator.canShare?.({ files: [file] })) {
+          await navigator.share({ files: [file], title: 'Perspective Elevation Ruler' });
+          return { status: 'shared' };
+        }
       } catch (err) {
-        if (err?.name === 'AbortError') return 'cancelled';
-        // fall through to download
+        if (err?.name === 'AbortError') return { status: 'cancelled' };
+        // Anything else: fall through and show the image instead.
       }
     }
 
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.rel = 'noopener';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 30_000);
-    return 'downloaded';
+    return { status: 'preview', url: URL.createObjectURL(blob), blob };
   }
 }
 
@@ -3516,6 +3624,15 @@ class App {
     $('btn-add-point').onclick = () => this._arm('add');
     $('btn-reset').onclick = () => this._reset();
     $('btn-export').onclick = () => this._export();
+
+    $('export-close').onclick = () => this._hideExport();
+    $('export-sheet').onclick = (e) => {
+      if (e.target === $('export-sheet')) this._hideExport();
+    };
+    $('export-open').onclick = () => {
+      if (this._exportUrl) window.open(this._exportUrl, '_blank', 'noopener');
+    };
+    $('export-download').onclick = (e) => this._saveExport(e);
   }
 
   /** A text field that parses a number and rejects nonsense without nagging. */
@@ -4239,12 +4356,20 @@ class App {
   // ======================================================================
 
   _reset() {
-    const keepPhoto = this.image != null;
-    const message = keepPhoto
-      ? 'Clear the calibration, points and annotations? The photograph stays loaded.'
-      : 'Reset everything?';
-    if (!window.confirm(message)) return;
+    const button = this.$('btn-reset');
+    // Confirm with a second tap rather than a modal dialog: an embedded page
+    // may not be permitted to open one, and on a tablet this is less fiddly.
+    if (!this._resetArmed) {
+      this._resetArmed = true;
+      button.textContent = 'Tap to confirm';
+      button.classList.add('is-armed');
+      clearTimeout(this._resetTimer);
+      this._resetTimer = setTimeout(() => this._disarmReset(), 3500);
+      return;
+    }
+    this._disarmReset();
 
+    const keepPhoto = this.image != null;
     this.annotations.clear();
     this.selectionQueue = [];
     Object.assign(this.state, {
@@ -4265,7 +4390,15 @@ class App {
     this._syncControls();
     this._recalculate();
     if (keepPhoto) this._arm('origin');
-    this._toast('Reset.');
+    this._toast(keepPhoto ? 'Reset. The photograph is still loaded.' : 'Reset.');
+  }
+
+  _disarmReset() {
+    clearTimeout(this._resetTimer);
+    this._resetArmed = false;
+    const button = this.$('btn-reset');
+    button.textContent = 'Reset';
+    button.classList.remove('is-armed');
   }
 
   async _export() {
@@ -4278,11 +4411,62 @@ class App {
       this._toast('Preparing image…');
       const canvas = this.exporter.compose(scene, { image: this.image });
       const result = await this.exporter.deliver(canvas, 'elevation-ruler.png');
-      if (result === 'shared') this._toast('Shared.');
-      else if (result === 'downloaded') this._toast('Image saved.');
-      else this._toast('Export cancelled.');
+      if (result.status === 'shared') this._toast('Shared.');
+      else if (result.status === 'cancelled') this._toast('Export cancelled.');
+      else await this._showExport(result.url, result.blob);
     } catch (err) {
       this._toast(err.message ?? 'Export failed.', true);
+    }
+  }
+
+  async _showExport(url, blob) {
+    const img = this.$('export-image');
+    if (this._exportUrl) URL.revokeObjectURL(this._exportUrl);
+    this._exportUrl = url;
+    this._exportBlob = blob;
+    img.src = url;
+    this.$('export-sheet').hidden = false;
+
+    // Offer whichever save route works here. Press-and-hold on the image works
+    // everywhere and is the hint shown regardless.
+    const link = this.$('export-download');
+    const openTab = this.$('export-open');
+    const saver = await this.exporter.hostSaver();
+    if (saver) {
+      // Embedded: the host mediates saving, and a plain link would do nothing.
+      link.removeAttribute('href');
+      link.removeAttribute('download');
+      link.textContent = 'Save image';
+      openTab.hidden = true;
+    } else {
+      link.href = url;
+      link.setAttribute('download', 'elevation-ruler.png');
+      link.textContent = 'Download';
+      openTab.hidden = false;
+    }
+  }
+
+  /** Save through the host when it mediates downloads; otherwise the link works. */
+  async _saveExport(event) {
+    const saver = await this.exporter.hostSaver();
+    if (!saver) return; // the anchor's own download does the work
+    event.preventDefault();
+    if (!this._exportBlob) return;
+    try {
+      await saver.save({ filename: 'elevation-ruler.png', data: this._exportBlob });
+      this._toast('Image saved.');
+    } catch (err) {
+      this._toast(ExportManager.saveErrorMessage(err), err?.code !== 'declined');
+    }
+  }
+
+  _hideExport() {
+    this.$('export-sheet').hidden = true;
+    this.$('export-image').removeAttribute('src');
+    this._exportBlob = null;
+    if (this._exportUrl) {
+      URL.revokeObjectURL(this._exportUrl);
+      this._exportUrl = null;
     }
   }
 

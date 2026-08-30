@@ -11,6 +11,40 @@
 export class ExportManager {
   constructor(renderer) {
     this.renderer = renderer;
+    this._hostSaver = undefined;
+  }
+
+  /**
+   * Some hosts embed this page in a frame that is not allowed to start a
+   * download, and offer their own save API instead. Resolve it once, up front,
+   * so the export sheet can offer the route that actually works here rather
+   * than a button that silently does nothing.
+   *
+   * @returns {Promise<{save:Function}|null>} null when the page can just use a
+   *          plain download link, which is the ordinary case.
+   */
+  hostSaver() {
+    if (this._hostSaver === undefined) {
+      const use = globalThis.claude?.use;
+      this._hostSaver = typeof use === 'function'
+        ? Promise.resolve(globalThis.claude.use('downloads')).catch(() => null)
+        : Promise.resolve(null);
+    }
+    return this._hostSaver;
+  }
+
+  /** Human-readable reason a host save did not happen. */
+  static saveErrorMessage(err) {
+    switch (err?.code) {
+      case 'declined':
+        return 'Save cancelled.';
+      case 'too_large':
+        return 'The image is too large to save. Try a smaller photograph.';
+      case 'rate_limited':
+        return 'A save is already in progress. Try again in a moment.';
+      default:
+        return 'The image could not be saved here. Press and hold it to save instead.';
+    }
   }
 
   /**
@@ -129,34 +163,35 @@ export class ExportManager {
   }
 
   /**
-   * Hand the finished image to the user. On iPadOS the share sheet is the only
-   * route that reaches "Save Image", so try that first and fall back to a
-   * download link (and finally to opening the image in a new tab).
+   * Hand the finished image to the user.
+   *
+   * The share sheet is the direct route to "Save Image" on iPadOS, so it is
+   * tried first. It is not always there — an embedded frame, an older browser,
+   * a desktop — and a download link is not a dependable fallback either, since
+   * embedded pages are commonly blocked from starting downloads. So delivery
+   * never claims success it cannot verify: when sharing is unavailable it
+   * returns the image for the caller to show, and a press-and-hold on that
+   * image saves it anywhere, sandbox or not.
+   *
+   * @returns {Promise<{status:'shared'|'cancelled'|'preview', url?:string, blob?:Blob}>}
    */
   async deliver(canvas, filename = 'elevation-ruler.png') {
     const blob = await this.toBlob(canvas);
     if (!blob) throw new Error('Could not encode the image.');
 
-    const file = new File([blob], filename, { type: 'image/png' });
-    if (navigator.canShare?.({ files: [file] }) && navigator.share) {
+    if (navigator.share) {
       try {
-        await navigator.share({ files: [file], title: 'Perspective Elevation Ruler' });
-        return 'shared';
+        const file = new File([blob], filename, { type: 'image/png' });
+        if (navigator.canShare?.({ files: [file] })) {
+          await navigator.share({ files: [file], title: 'Perspective Elevation Ruler' });
+          return { status: 'shared' };
+        }
       } catch (err) {
-        if (err?.name === 'AbortError') return 'cancelled';
-        // fall through to download
+        if (err?.name === 'AbortError') return { status: 'cancelled' };
+        // Anything else: fall through and show the image instead.
       }
     }
 
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.rel = 'noopener';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 30_000);
-    return 'downloaded';
+    return { status: 'preview', url: URL.createObjectURL(blob), blob };
   }
 }

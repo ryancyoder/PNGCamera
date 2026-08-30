@@ -58,6 +58,20 @@ That one file works from `file://` with no server at all.
 node tests/run.mjs              # unit tests for the projection maths
 ```
 
+To put it on the web permanently, GitHub Pages serves this directory as-is —
+there is nothing to compile. Point Pages at the branch and the app lives at
+`.../PerspectiveElevationRuler/`.
+
+### Saving the exported image
+
+Export composites a fresh PNG and offers it three ways, because no single route
+works everywhere. The share sheet is used when the browser has one — that is
+the direct path to *Save Image* on iPadOS. Otherwise the image is shown full
+size and a press-and-hold saves it, which works even where a page is not
+allowed to start a download. Where the page is embedded in a host that mediates
+saving, the Save button goes through the host instead of offering a link that
+would quietly do nothing.
+
 ## Workflow
 
 1. **Photograph.** Take one with the iPad camera or pick one from the library.

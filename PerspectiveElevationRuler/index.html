@@ -300,6 +300,26 @@
 <input type="file" id="file-camera" accept="image/*" capture="environment" hidden>
 <input type="file" id="file-library" accept="image/*" hidden>
 
+<!-- Export preview. On iPadOS a press-and-hold on the image is the most
+     reliable route to Save to Photos, and it works where a download link
+     does not (in an embedded frame, for instance). -->
+<div class="sheet" id="export-sheet" hidden>
+  <div class="sheet-inner">
+    <header class="sheet-head">
+      <div>
+        <strong>Elevation ruler image</strong>
+        <em id="export-hint">Press and hold the image to save it to Photos.</em>
+      </div>
+      <button class="btn btn-tiny" id="export-close">Done</button>
+    </header>
+    <div class="sheet-body"><img id="export-image" alt="Photograph with the elevation ruler drawn on it"></div>
+    <footer class="sheet-foot">
+      <a class="btn" id="export-download" download="elevation-ruler.png">Download</a>
+      <button class="btn" id="export-open">Open in new tab</button>
+    </footer>
+  </div>
+</div>
+
 <div class="toast" id="toast" hidden></div>
 
 <script type="module" src="src/main.js"></script>

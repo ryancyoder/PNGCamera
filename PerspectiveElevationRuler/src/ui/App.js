@@ -222,6 +222,15 @@ export class App {
     $('btn-add-point').onclick = () => this._arm('add');
     $('btn-reset').onclick = () => this._reset();
     $('btn-export').onclick = () => this._export();
+
+    $('export-close').onclick = () => this._hideExport();
+    $('export-sheet').onclick = (e) => {
+      if (e.target === $('export-sheet')) this._hideExport();
+    };
+    $('export-open').onclick = () => {
+      if (this._exportUrl) window.open(this._exportUrl, '_blank', 'noopener');
+    };
+    $('export-download').onclick = (e) => this._saveExport(e);
   }
 
   /** A text field that parses a number and rejects nonsense without nagging. */
@@ -945,12 +954,20 @@ export class App {
   // ======================================================================
 
   _reset() {
-    const keepPhoto = this.image != null;
-    const message = keepPhoto
-      ? 'Clear the calibration, points and annotations? The photograph stays loaded.'
-      : 'Reset everything?';
-    if (!window.confirm(message)) return;
+    const button = this.$('btn-reset');
+    // Confirm with a second tap rather than a modal dialog: an embedded page
+    // may not be permitted to open one, and on a tablet this is less fiddly.
+    if (!this._resetArmed) {
+      this._resetArmed = true;
+      button.textContent = 'Tap to confirm';
+      button.classList.add('is-armed');
+      clearTimeout(this._resetTimer);
+      this._resetTimer = setTimeout(() => this._disarmReset(), 3500);
+      return;
+    }
+    this._disarmReset();
 
+    const keepPhoto = this.image != null;
     this.annotations.clear();
     this.selectionQueue = [];
     Object.assign(this.state, {
@@ -971,7 +988,15 @@ export class App {
     this._syncControls();
     this._recalculate();
     if (keepPhoto) this._arm('origin');
-    this._toast('Reset.');
+    this._toast(keepPhoto ? 'Reset. The photograph is still loaded.' : 'Reset.');
+  }
+
+  _disarmReset() {
+    clearTimeout(this._resetTimer);
+    this._resetArmed = false;
+    const button = this.$('btn-reset');
+    button.textContent = 'Reset';
+    button.classList.remove('is-armed');
   }
 
   async _export() {
@@ -984,11 +1009,62 @@ export class App {
       this._toast('Preparing image…');
       const canvas = this.exporter.compose(scene, { image: this.image });
       const result = await this.exporter.deliver(canvas, 'elevation-ruler.png');
-      if (result === 'shared') this._toast('Shared.');
-      else if (result === 'downloaded') this._toast('Image saved.');
-      else this._toast('Export cancelled.');
+      if (result.status === 'shared') this._toast('Shared.');
+      else if (result.status === 'cancelled') this._toast('Export cancelled.');
+      else await this._showExport(result.url, result.blob);
     } catch (err) {
       this._toast(err.message ?? 'Export failed.', true);
+    }
+  }
+
+  async _showExport(url, blob) {
+    const img = this.$('export-image');
+    if (this._exportUrl) URL.revokeObjectURL(this._exportUrl);
+    this._exportUrl = url;
+    this._exportBlob = blob;
+    img.src = url;
+    this.$('export-sheet').hidden = false;
+
+    // Offer whichever save route works here. Press-and-hold on the image works
+    // everywhere and is the hint shown regardless.
+    const link = this.$('export-download');
+    const openTab = this.$('export-open');
+    const saver = await this.exporter.hostSaver();
+    if (saver) {
+      // Embedded: the host mediates saving, and a plain link would do nothing.
+      link.removeAttribute('href');
+      link.removeAttribute('download');
+      link.textContent = 'Save image';
+      openTab.hidden = true;
+    } else {
+      link.href = url;
+      link.setAttribute('download', 'elevation-ruler.png');
+      link.textContent = 'Download';
+      openTab.hidden = false;
+    }
+  }
+
+  /** Save through the host when it mediates downloads; otherwise the link works. */
+  async _saveExport(event) {
+    const saver = await this.exporter.hostSaver();
+    if (!saver) return; // the anchor's own download does the work
+    event.preventDefault();
+    if (!this._exportBlob) return;
+    try {
+      await saver.save({ filename: 'elevation-ruler.png', data: this._exportBlob });
+      this._toast('Image saved.');
+    } catch (err) {
+      this._toast(ExportManager.saveErrorMessage(err), err?.code !== 'declined');
+    }
+  }
+
+  _hideExport() {
+    this.$('export-sheet').hidden = true;
+    this.$('export-image').removeAttribute('src');
+    this._exportBlob = null;
+    if (this._exportUrl) {
+      URL.revokeObjectURL(this._exportUrl);
+      this._exportUrl = null;
     }
   }
 
