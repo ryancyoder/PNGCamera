@@ -63,7 +63,9 @@ export class OverlayRenderer {
       staffDistance: options.staffDistance ?? originDistance,
     });
 
-    if (options.showHorizon) this._horizon(ctx, u, geo.sight.horizon);
+    if (options.showHorizon) {
+      this._horizon(ctx, u, geo.sight.horizon, projection, model, scene.solution, options);
+    }
     if (options.showRuler) {
       this._groundLine(ctx, u, geo.ground, imageWidth, imageHeight);
       this._slopeRungs(ctx, u, geo.slope, model, options);
@@ -215,21 +217,60 @@ export class OverlayRenderer {
 
   // --- scene elements -----------------------------------------------------
 
-  _horizon(ctx, u, segment) {
+  /**
+   * The horizon, drawn as a handle rather than a decoration.
+   *
+   * It is the camera's own eye level: every point in the scene at exactly the
+   * camera's elevation projects onto it. That makes it the one calibration
+   * quantity a photograph shows you directly, so it is worth dragging — and
+   * worth labelling with the elevation it implies, which is the number that
+   * tells you whether the placement is sane.
+   */
+  _horizon(ctx, u, segment, projection, model, solution, options) {
     if (!segment) return;
+    const active = options.horizonActive;
+
     this._line(ctx, segment.a, segment.b, {
-      color: PALETTE.horizon,
-      width: 1.6 * u,
-      alpha: 0.5,
+      color: active ? PALETTE.sight : PALETTE.horizon,
+      width: (active ? 2.6 : 1.6) * u,
+      alpha: active ? 0.95 : 0.6,
       dash: [10 * u, 9 * u],
     });
+
     const dir = normalize(sub(segment.b, segment.a));
-    const at = add(segment.a, scale(dir, dist(segment.a, segment.b) * 0.06));
-    this._label(ctx, 'HORIZON', add(at, scale(perp(dir), -10 * u)), u, {
+    const span = dist(segment.a, segment.b);
+    const at = add(segment.a, scale(dir, span * 0.06));
+    const up = perp(dir);
+
+    // Grip marks, so the line reads as something you can take hold of.
+    const grip = add(at, scale(dir, -14 * u));
+    for (let i = -1; i <= 1; i++) {
+      const c = add(grip, scale(dir, i * 5 * u));
+      this._line(ctx, add(c, scale(up, -5 * u)), add(c, scale(up, 5 * u)), {
+        color: active ? PALETTE.sight : PALETTE.horizon,
+        width: 1.8 * u,
+        alpha: active ? 1 : 0.75,
+      });
+    }
+
+    const eyeLevel =
+      solution && model ? model.formatElevation(model.originElevation + solution.cameraHeight) : null;
+    const text = eyeLevel ? `HORIZON · EYE LEVEL ${eyeLevel}` : 'HORIZON';
+    this._label(ctx, text, add(at, scale(up, -13 * u)), u, {
       size: 13,
-      color: PALETTE.horizon,
-      alpha: 0.75,
+      color: active ? PALETTE.sight : PALETTE.horizon,
+      alpha: active ? 1 : 0.85,
+      plate: active,
+      angle: Math.atan2(dir.y, dir.x),
     });
+    if (options.horizonHint && !active) {
+      this._label(ctx, 'drag to calibrate', add(at, scale(up, 6 * u)), u, {
+        size: 11,
+        color: PALETTE.horizon,
+        alpha: 0.6,
+        angle: Math.atan2(dir.y, dir.x),
+      });
+    }
   }
 
   _groundLine(ctx, u, pts, w, h) {

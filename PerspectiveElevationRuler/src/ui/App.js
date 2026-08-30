@@ -501,11 +501,66 @@ export class App {
       this.view.render();
       return true;
     }
+
+    // The horizon is checked after the points but before panning: it spans the
+    // whole frame, so it must never win over something specific the user aimed at.
+    if (this._horizonUnder(p, tol)) {
+      this.drag = { horizon: true };
+      // Dragging the horizon IS the pitch solve, so make the panel say so.
+      this.state.solveMode = 'pitch';
+      this.$('in-solve-mode').value = 'pitch';
+      this.view.render();
+      return true;
+    }
     return false; // let the view pan
+  }
+
+  /**
+   * Is the pointer on the horizon? The horizon runs perpendicular to the sight
+   * line, so its distance from any point is just the gap in the along-sight
+   * coordinate — no line-segment maths needed.
+   */
+  _horizonUnder(p, tol) {
+    if (!this.state.showHorizon || !this.projection) return false;
+    if (!this.projection.horizonSegment()) return false; // off-screen
+    const { t } = this.projection.toLineCoords(p);
+    return Math.abs(t - this.projection.horizonT) < tol;
+  }
+
+  /**
+   * Move the horizon to the pointer, which sets the camera's pitch outright.
+   * Camera height and origin distance then follow in closed form, so this is
+   * the one calibration control that needs no searching.
+   *
+   * Refuses to move where no camera exists rather than clamping to a guess: the
+   * line simply stops, which reads as the limit it is.
+   */
+  _dragHorizon(pointer) {
+    // Keep the pointer inside the photograph. The horizon then always passes
+    // through a point that is inside the frame, so it stays visible and can be
+    // grabbed again. Without this it can be flung off-screen, where nothing can
+    // take hold of it and the handle is simply lost — with an absurd camera to
+    // go with it. The horizon slider still covers the full range for the rare
+    // photograph whose horizon genuinely falls outside the frame.
+    const p = {
+      x: clamp(pointer.x, 0, this.view.imageWidth),
+      y: clamp(pointer.y, 0, this.view.imageHeight),
+    };
+    const { t } = this.projection.toLineCoords(p);
+    const pitchRad = Math.atan2(t, this.projection.focalPx);
+    const domain = this._solveDomain();
+    const degrees = domain ? clamp(pitchRad * RAD, domain.min, domain.max) : pitchRad * RAD;
+    if (!solveFromPitch(degrees * DEG, this.context)) return;
+    this.state.solveValue = degrees;
+    this._recalculate({ quiet: true });
   }
 
   _pointerMove(p) {
     if (!this.drag) return;
+    if (this.drag.horizon) {
+      this._dragHorizon(p);
+      return;
+    }
     if (this.drag.dimension) {
       this.annotations.moveDimensionLabel(
         this.drag.dimension,
@@ -745,6 +800,8 @@ export class App {
         showHorizon: this.state.showHorizon,
         showCrosshair: this.state.showCrosshair,
         showDistances: this.state.showDistances,
+        horizonActive: this.drag?.horizon === true,
+        horizonHint: this.state.showHorizon && !this.annotations.measurements.length,
         rulerStyle: this.state.rulerStyle,
         labelMode: this.state.labelMode,
         staffDistance: this.state.staffDistance,
@@ -864,10 +921,11 @@ export class App {
     if (this.solution) {
       set('out-cam-h', `${m.formatNumber(this.solution.cameraHeight)}${this._suffix}`);
       set('out-pitch', `${(this.solution.pitchRad * RAD).toFixed(1)}° down`);
+      set('out-eye', m.formatElevation(m.originElevation + this.solution.cameraHeight));
       set('out-origin-d', `${m.formatNumber(this.solution.originDistance)}${this._suffix}`);
       set('out-focal', `${Math.round(this.projection.focalPx)} px`);
     } else {
-      for (const id of ['out-cam-h', 'out-pitch', 'out-origin-d', 'out-focal']) set(id, '—');
+      for (const id of ['out-cam-h', 'out-pitch', 'out-origin-d', 'out-focal', 'out-eye']) set(id, '—');
     }
 
     const warn = this.$('cal-warning');

@@ -86,7 +86,7 @@
         <span class="mark" aria-hidden="true"></span>
         <div>
           <strong>Perspective Elevation Ruler</strong>
-          <em>Line-of-sight vertical plane · <span id="app-version">v1.2</span></em>
+          <em>Line-of-sight vertical plane · <span id="app-version">v1.3</span></em>
         </div>
       </div>
       <button class="panel-close" id="panel-close" aria-label="Hide controls">✕</button>
@@ -155,7 +155,12 @@
         <h2><i>3</i> Calibrate Perspective</h2>
         <p class="hint">
           The line of sight runs through both known points. Drag either point on the
-          photo to re-aim it, then fine-tune below until the ruler sits on the ground.
+          photo to re-aim it, then fine-tune until the ruler sits on the ground.
+        </p>
+        <p class="hint hint-tip">
+          <strong>Drag the horizon</strong> on the photo if you can see where it falls.
+          It is the camera's own eye level, so placing it sets the viewing angle
+          outright — camera height and distance then follow exactly.
         </p>
 
         <label class="field field-slider">
@@ -182,6 +187,7 @@
         <div class="derived" id="derived-cal">
           <span>Camera height</span><strong id="out-cam-h">—</strong>
           <span>Viewing angle</span><strong id="out-pitch">—</strong>
+          <span>Eye level</span><strong id="out-eye">—</strong>
           <span>Origin distance</span><strong id="out-origin-d">—</strong>
           <span>Focal length</span><strong id="out-focal">—</strong>
         </div>
@@ -250,7 +256,7 @@
           <label class="toggle"><input type="checkbox" id="tg-ruler" checked><span>Elevation ruler</span></label>
           <label class="toggle"><input type="checkbox" id="tg-labels" checked><span>Labels</span></label>
           <label class="toggle"><input type="checkbox" id="tg-sight" checked><span>Line of sight</span></label>
-          <label class="toggle"><input type="checkbox" id="tg-horizon" checked><span>Horizon</span></label>
+          <label class="toggle"><input type="checkbox" id="tg-horizon" checked><span>Horizon (drag to calibrate)</span></label>
           <label class="toggle"><input type="checkbox" id="tg-crosshair"><span>Crosshair</span></label>
           <label class="toggle"><input type="checkbox" id="tg-distances"><span>Distances</span></label>
         </div>

@@ -332,6 +332,12 @@ html, body {
 
 .hint { margin: 0; font-size: 12px; color: var(--dim); line-height: 1.5; }
 .hint strong { color: var(--text); font-weight: 600; }
+.hint-tip {
+  border-left: 2px solid var(--sight);
+  padding-left: 10px;
+}
+.hint-tip strong { color: var(--sight); }
+
 .warn {
   margin: 0;
   font-size: 12px;
@@ -746,7 +752,7 @@ input[type="range"]::-moz-range-thumb {
         <span class="mark" aria-hidden="true"></span>
         <div>
           <strong>Perspective Elevation Ruler</strong>
-          <em>Line-of-sight vertical plane · <span id="app-version">v1.2</span></em>
+          <em>Line-of-sight vertical plane · <span id="app-version">v1.3</span></em>
         </div>
       </div>
       <button class="panel-close" id="panel-close" aria-label="Hide controls">✕</button>
@@ -815,7 +821,12 @@ input[type="range"]::-moz-range-thumb {
         <h2><i>3</i> Calibrate Perspective</h2>
         <p class="hint">
           The line of sight runs through both known points. Drag either point on the
-          photo to re-aim it, then fine-tune below until the ruler sits on the ground.
+          photo to re-aim it, then fine-tune until the ruler sits on the ground.
+        </p>
+        <p class="hint hint-tip">
+          <strong>Drag the horizon</strong> on the photo if you can see where it falls.
+          It is the camera's own eye level, so placing it sets the viewing angle
+          outright — camera height and distance then follow exactly.
         </p>
 
         <label class="field field-slider">
@@ -842,6 +853,7 @@ input[type="range"]::-moz-range-thumb {
         <div class="derived" id="derived-cal">
           <span>Camera height</span><strong id="out-cam-h">—</strong>
           <span>Viewing angle</span><strong id="out-pitch">—</strong>
+          <span>Eye level</span><strong id="out-eye">—</strong>
           <span>Origin distance</span><strong id="out-origin-d">—</strong>
           <span>Focal length</span><strong id="out-focal">—</strong>
         </div>
@@ -910,7 +922,7 @@ input[type="range"]::-moz-range-thumb {
           <label class="toggle"><input type="checkbox" id="tg-ruler" checked><span>Elevation ruler</span></label>
           <label class="toggle"><input type="checkbox" id="tg-labels" checked><span>Labels</span></label>
           <label class="toggle"><input type="checkbox" id="tg-sight" checked><span>Line of sight</span></label>
-          <label class="toggle"><input type="checkbox" id="tg-horizon" checked><span>Horizon</span></label>
+          <label class="toggle"><input type="checkbox" id="tg-horizon" checked><span>Horizon (drag to calibrate)</span></label>
           <label class="toggle"><input type="checkbox" id="tg-crosshair"><span>Crosshair</span></label>
           <label class="toggle"><input type="checkbox" id="tg-distances"><span>Distances</span></label>
         </div>
@@ -2941,7 +2953,9 @@ class OverlayRenderer {
       staffDistance: options.staffDistance ?? originDistance,
     });
 
-    if (options.showHorizon) this._horizon(ctx, u, geo.sight.horizon);
+    if (options.showHorizon) {
+      this._horizon(ctx, u, geo.sight.horizon, projection, model, scene.solution, options);
+    }
     if (options.showRuler) {
       this._groundLine(ctx, u, geo.ground, imageWidth, imageHeight);
       this._slopeRungs(ctx, u, geo.slope, model, options);
@@ -3093,21 +3107,60 @@ class OverlayRenderer {
 
   // --- scene elements -----------------------------------------------------
 
-  _horizon(ctx, u, segment) {
+  /**
+   * The horizon, drawn as a handle rather than a decoration.
+   *
+   * It is the camera's own eye level: every point in the scene at exactly the
+   * camera's elevation projects onto it. That makes it the one calibration
+   * quantity a photograph shows you directly, so it is worth dragging — and
+   * worth labelling with the elevation it implies, which is the number that
+   * tells you whether the placement is sane.
+   */
+  _horizon(ctx, u, segment, projection, model, solution, options) {
     if (!segment) return;
+    const active = options.horizonActive;
+
     this._line(ctx, segment.a, segment.b, {
-      color: PALETTE.horizon,
-      width: 1.6 * u,
-      alpha: 0.5,
+      color: active ? PALETTE.sight : PALETTE.horizon,
+      width: (active ? 2.6 : 1.6) * u,
+      alpha: active ? 0.95 : 0.6,
       dash: [10 * u, 9 * u],
     });
+
     const dir = normalize(sub(segment.b, segment.a));
-    const at = add(segment.a, scale(dir, dist(segment.a, segment.b) * 0.06));
-    this._label(ctx, 'HORIZON', add(at, scale(perp(dir), -10 * u)), u, {
+    const span = dist(segment.a, segment.b);
+    const at = add(segment.a, scale(dir, span * 0.06));
+    const up = perp(dir);
+
+    // Grip marks, so the line reads as something you can take hold of.
+    const grip = add(at, scale(dir, -14 * u));
+    for (let i = -1; i <= 1; i++) {
+      const c = add(grip, scale(dir, i * 5 * u));
+      this._line(ctx, add(c, scale(up, -5 * u)), add(c, scale(up, 5 * u)), {
+        color: active ? PALETTE.sight : PALETTE.horizon,
+        width: 1.8 * u,
+        alpha: active ? 1 : 0.75,
+      });
+    }
+
+    const eyeLevel =
+      solution && model ? model.formatElevation(model.originElevation + solution.cameraHeight) : null;
+    const text = eyeLevel ? `HORIZON · EYE LEVEL ${eyeLevel}` : 'HORIZON';
+    this._label(ctx, text, add(at, scale(up, -13 * u)), u, {
       size: 13,
-      color: PALETTE.horizon,
-      alpha: 0.75,
+      color: active ? PALETTE.sight : PALETTE.horizon,
+      alpha: active ? 1 : 0.85,
+      plate: active,
+      angle: Math.atan2(dir.y, dir.x),
     });
+    if (options.horizonHint && !active) {
+      this._label(ctx, 'drag to calibrate', add(at, scale(up, 6 * u)), u, {
+        size: 11,
+        color: PALETTE.horizon,
+        alpha: 0.6,
+        angle: Math.atan2(dir.y, dir.x),
+      });
+    }
   }
 
   _groundLine(ctx, u, pts, w, h) {
@@ -4093,11 +4146,66 @@ class App {
       this.view.render();
       return true;
     }
+
+    // The horizon is checked after the points but before panning: it spans the
+    // whole frame, so it must never win over something specific the user aimed at.
+    if (this._horizonUnder(p, tol)) {
+      this.drag = { horizon: true };
+      // Dragging the horizon IS the pitch solve, so make the panel say so.
+      this.state.solveMode = 'pitch';
+      this.$('in-solve-mode').value = 'pitch';
+      this.view.render();
+      return true;
+    }
     return false; // let the view pan
+  }
+
+  /**
+   * Is the pointer on the horizon? The horizon runs perpendicular to the sight
+   * line, so its distance from any point is just the gap in the along-sight
+   * coordinate — no line-segment maths needed.
+   */
+  _horizonUnder(p, tol) {
+    if (!this.state.showHorizon || !this.projection) return false;
+    if (!this.projection.horizonSegment()) return false; // off-screen
+    const { t } = this.projection.toLineCoords(p);
+    return Math.abs(t - this.projection.horizonT) < tol;
+  }
+
+  /**
+   * Move the horizon to the pointer, which sets the camera's pitch outright.
+   * Camera height and origin distance then follow in closed form, so this is
+   * the one calibration control that needs no searching.
+   *
+   * Refuses to move where no camera exists rather than clamping to a guess: the
+   * line simply stops, which reads as the limit it is.
+   */
+  _dragHorizon(pointer) {
+    // Keep the pointer inside the photograph. The horizon then always passes
+    // through a point that is inside the frame, so it stays visible and can be
+    // grabbed again. Without this it can be flung off-screen, where nothing can
+    // take hold of it and the handle is simply lost — with an absurd camera to
+    // go with it. The horizon slider still covers the full range for the rare
+    // photograph whose horizon genuinely falls outside the frame.
+    const p = {
+      x: clamp(pointer.x, 0, this.view.imageWidth),
+      y: clamp(pointer.y, 0, this.view.imageHeight),
+    };
+    const { t } = this.projection.toLineCoords(p);
+    const pitchRad = Math.atan2(t, this.projection.focalPx);
+    const domain = this._solveDomain();
+    const degrees = domain ? clamp(pitchRad * RAD, domain.min, domain.max) : pitchRad * RAD;
+    if (!solveFromPitch(degrees * DEG, this.context)) return;
+    this.state.solveValue = degrees;
+    this._recalculate({ quiet: true });
   }
 
   _pointerMove(p) {
     if (!this.drag) return;
+    if (this.drag.horizon) {
+      this._dragHorizon(p);
+      return;
+    }
     if (this.drag.dimension) {
       this.annotations.moveDimensionLabel(
         this.drag.dimension,
@@ -4337,6 +4445,8 @@ class App {
         showHorizon: this.state.showHorizon,
         showCrosshair: this.state.showCrosshair,
         showDistances: this.state.showDistances,
+        horizonActive: this.drag?.horizon === true,
+        horizonHint: this.state.showHorizon && !this.annotations.measurements.length,
         rulerStyle: this.state.rulerStyle,
         labelMode: this.state.labelMode,
         staffDistance: this.state.staffDistance,
@@ -4456,10 +4566,11 @@ class App {
     if (this.solution) {
       set('out-cam-h', `${m.formatNumber(this.solution.cameraHeight)}${this._suffix}`);
       set('out-pitch', `${(this.solution.pitchRad * RAD).toFixed(1)}° down`);
+      set('out-eye', m.formatElevation(m.originElevation + this.solution.cameraHeight));
       set('out-origin-d', `${m.formatNumber(this.solution.originDistance)}${this._suffix}`);
       set('out-focal', `${Math.round(this.projection.focalPx)} px`);
     } else {
-      for (const id of ['out-cam-h', 'out-pitch', 'out-origin-d', 'out-focal']) set(id, '—');
+      for (const id of ['out-cam-h', 'out-pitch', 'out-origin-d', 'out-focal', 'out-eye']) set(id, '—');
     }
 
     const warn = this.$('cal-warning');

@@ -82,9 +82,11 @@ would quietly do nothing.
    puts the foundation at the far end, so Point B is often the nearer one.
 4. **Line of sight.** It runs through both reference points and is drawn
    through the picture to its vanishing point. Drag either point to re-aim it.
-5. **Calibrate.** Set the perspective strength, then fine-tune by camera
-   height, line-of-sight distance, or by dragging the viewing angle. Both
-   reference points stay pinned to the pixels you tapped whatever you change.
+5. **Calibrate.** Set the perspective strength, then fine-tune. If you can see
+   where the horizon falls in the photograph, **drag it** — that is usually the
+   quickest and most reliable route. Otherwise fine-tune by camera height or
+   line-of-sight distance. Both reference points stay pinned to the pixels you
+   tapped whatever you change.
 6. **Measure.** Tap `Add Point` and tap along the sight line. Drag a point and
    its elevation updates continuously.
 7. **Annotate and export.** Select two points for a vertical dimension,
@@ -133,6 +135,24 @@ h = (−ΔY·cot β_B − D) / (cot β_A − cot β_B)
 So `solveFromPitch` is closed form, and the "camera height" and "line-of-sight
 distance" modes root-find on pitch over that same closed form. Every mode keeps
 both reference points on the exact pixels you tapped.
+
+### Why the horizon is the control worth reaching for
+
+The horizon sits at `t = focalPx * tan(theta)` along the sight line, which makes
+its position a direct read of the camera's pitch. Placing it therefore fixes
+`theta`, and camera height and origin distance follow from the closed form above
+with nothing to search for.
+
+It is also the only one of the three you can actually *see*. Camera height and
+distance are recollections; the horizon is in the photograph. And because every
+point in the scene at the camera's own elevation projects onto it, the horizon
+is the camera's eye level — so the app labels it with the elevation it implies,
+which is the number that tells you whether the placement is sane.
+
+Dragging is confined to the frame. Off the frame the horizon cannot be seen or
+grabbed, so flinging it away would lose the handle for good along with any sane
+camera; the slider still covers the full range for a photograph whose horizon
+genuinely falls outside the picture.
 
 ### The ruler
 
@@ -219,3 +239,7 @@ first.
   is angled away from the sight line, will drift.
 - Accuracy degrades sharply near the horizon, where a pixel is worth a large
   distance. Readings far past the second reference point are extrapolation.
+- Placing the horizon by eye is only as good as the horizon is visible. A
+  treeline or ridge is *above* the true horizon, not on it; over water or a
+  level field the line is trustworthy, on rolling ground it is a starting point
+  to refine.
