@@ -48,6 +48,10 @@ export class OverlayRenderer {
     if (!projection || !model || !ruler) return;
 
     const u = imageWidth / 1000; // one "design unit"
+    // Label placement is resolved across the whole overlay, not per element:
+    // the two halves of a foundation ruler meet at the datum, and culling them
+    // independently lets both drop a number in the same place.
+    this._labelSlots = [];
     ctx.save();
     ctx.globalAlpha = options.opacity;
     ctx.lineCap = 'round';
@@ -75,6 +79,20 @@ export class OverlayRenderer {
   }
 
   // --- primitives ---------------------------------------------------------
+
+  /**
+   * Reserve room for a label. Returns false when something is already there.
+   * `force` is for labels that must never be dropped, such as the datum.
+   */
+  _claimLabelSlot(at, minGap, force = false) {
+    if (!force) {
+      for (const slot of this._labelSlots) {
+        if (Math.hypot(at.x - slot.x, at.y - slot.y) < minGap) return false;
+      }
+    }
+    this._labelSlots.push(at);
+    return true;
+  }
 
   _stroke(ctx, path, { color, width, halo = true, alpha = 1, dash = null }) {
     ctx.save();
@@ -260,7 +278,6 @@ export class OverlayRenderer {
     // ruler — but overlapping numbers do not, so a label is only drawn once
     // there is room for it clear of the last one.
     const minLabelGap = 26 * u;
-    let lastLabel = null;
 
     for (const r of ordered) {
       const a = fade(r.depth);
@@ -276,8 +293,7 @@ export class OverlayRenderer {
       const dir = normalize(sub(r.right, r.left));
       const at = add(r.right, scale(dir, 10 * u));
       // The origin is the datum: it is always labelled, whatever else is culled.
-      if (!major && lastLabel && dist(at, lastLabel) < minLabelGap) continue;
-      lastLabel = at;
+      if (!this._claimLabelSlot(at, minLabelGap, major)) continue;
       const text = options.labelMode === 'change' ? r.level.change : r.level.label;
       this._label(ctx, text, at, u, {
         size: major ? 20 : 17,
@@ -295,7 +311,6 @@ export class OverlayRenderer {
       this._line(ctx, post.a, post.b, { color: PALETTE.rung, width: 2.4 * u, alpha: 0.8 });
     }
     const minStaffGap = 24 * u;
-    let lastStaffLabel = null;
     for (const r of rungs) {
       const major = r.level.isOrigin;
       this._line(ctx, r.left, r.right, {
@@ -303,11 +318,10 @@ export class OverlayRenderer {
         width: (major ? 3.2 : r.level.isMajor ? 2.2 : 1.3) * u,
         alpha: major ? 1 : r.level.isMajor ? 0.95 : 0.7,
       });
-      if (!options.showLabels || !r.level.isMajor) continue;
+      if (!options.showLabels) continue;
       const dir = normalize(sub(r.right, r.left));
       const at = add(r.right, scale(dir, 8 * u));
-      if (!major && lastStaffLabel && dist(at, lastStaffLabel) < minStaffGap) continue;
-      lastStaffLabel = at;
+      if (!this._claimLabelSlot(at, minStaffGap, major)) continue;
       const text = options.labelMode === 'change' ? r.level.change : r.level.label;
       this._label(ctx, text, at, u, {
         size: major ? 19 : 16,

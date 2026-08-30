@@ -76,8 +76,10 @@ would quietly do nothing.
 
 1. **Photograph.** Take one with the iPad camera or pick one from the library.
 2. **Origin.** Tap the point whose elevation you know, and type that elevation.
-3. **Point B.** Tap a second known point *farther along the same sight line*,
-   and enter its elevation and the horizontal distance between the two.
+3. **Point B.** Tap a second known point on the same sight line, and enter its
+   elevation, the horizontal distance between the two, and whether it is nearer
+   to you or farther away than the origin. Photographing a house from its yard
+   puts the foundation at the far end, so Point B is often the nearer one.
 4. **Line of sight.** It runs through both reference points and is drawn
    through the picture to its vanishing point. Drag either point to re-aim it.
 5. **Calibrate.** Set the perspective strength, then fine-tune by camera
@@ -134,12 +136,20 @@ both reference points on the exact pixels you tapped.
 
 ### The ruler
 
-Two styles, both projected rather than drawn:
+Three styles, all projected rather than drawn:
 
 - **Follow the grade** — each elevation increment is a rung placed where the
   calibrated grade reaches that elevation, so climbing the ruler walks you into
   the distance. Rungs shorten and bunch together as they recede, and are faded
   by depth.
+- **Foundation** — for measuring against a building. Mark the foundation as the
+  zero line: above it the increments run straight up at the foundation's own
+  distance, because that is what "8 ft above the foundation" means — you do not
+  walk backwards to measure a wall. Below it they project out across the grade,
+  which is what "2 ft below the foundation" means out in the yard. The two
+  halves meet exactly at the datum, since the zero rung is the same point in
+  both, and a tapped measurement switches rule at the same line so a reading
+  always agrees with the ruler drawn through it.
 - **Levelling staff** — a virtual rod at one distance, graduated in elevation.
   Nothing recedes, but the graduations still converge on the vertical vanishing
   point, so they open out or close up depending on which way the camera tilts.
@@ -204,5 +214,8 @@ first.
 - The ground between the two reference points is assumed to be a straight
   grade. Where the real ground is convex or concave, readings between the two
   known points are interpolated along that straight line.
+- Foundation mode assumes the wall is a flat face square to the sight line and
+  standing at the origin's distance. A reading taken up a wall that leans, or
+  is angled away from the sight line, will drift.
 - Accuracy degrades sharply near the horizon, where a pixel is worth a large
   distance. Readings far past the second reference point are extrapolation.

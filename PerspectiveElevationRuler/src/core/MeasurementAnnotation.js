@@ -18,9 +18,11 @@ export class MeasurementAnnotation {
   /**
    * @param {object} o
    * @param {{x,y}}  o.imagePoint  where the marker sits, in photo pixels
-   * @param {'ground'|'depth'} o.mode how to turn the view ray into an elevation:
-   *        'ground' intersects the calibrated grade, 'depth' reads the ray at a
-   *        fixed distance along the line of sight (a virtual levelling staff).
+   * @param {'ground'|'depth'|'foundation'} o.mode how to turn the view ray into
+   *        an elevation: 'ground' intersects the calibrated grade, 'depth' reads
+   *        the ray at a fixed distance along the line of sight (a virtual
+   *        levelling staff), and 'foundation' switches between the two at the
+   *        datum — up the wall above it, out across the grade below it.
    */
   constructor({
     id = newId(),
@@ -85,16 +87,30 @@ export class MeasurementAnnotation {
       return this;
     }
 
-    const hit =
-      this.mode === 'depth' && this.fixedDistance != null
-        ? projection.elevationAtDepth(t, this.fixedDistance)
-        : projection.intersectGround(t, model.slope, originDistance);
+    let hit;
+    if (this.mode === 'foundation') {
+      // Read against the wall above the datum and across the grade below it, so
+      // a measurement always agrees with the ruler drawn through the same point.
+      // The test is the wall reading itself: it crosses zero exactly where the
+      // two halves of the ruler meet, so the rule is continuous at the datum.
+      const wall = projection.elevationAtDepth(t, originDistance);
+      hit =
+        wall && wall.Y > 0
+          ? wall
+          : projection.intersectGround(t, model.slopeAlongSight, originDistance);
+    } else if (this.mode === 'depth' && this.fixedDistance != null) {
+      hit = projection.elevationAtDepth(t, this.fixedDistance);
+    } else {
+      hit = projection.intersectGround(t, model.slopeAlongSight, originDistance);
+    }
 
     if (!hit) {
       this.reason =
         this.mode === 'depth'
           ? 'No reading at that distance.'
-          : 'That sight line never meets the calibrated grade — it is at or beyond the horizon.';
+          : this.mode === 'foundation'
+            ? 'Below the foundation, that sight line never meets the grade — it is at or beyond the horizon.'
+            : 'That sight line never meets the calibrated grade — it is at or beyond the horizon.';
       return this;
     }
 
@@ -176,10 +192,13 @@ export class DimensionAnnotation {
           text = run == null ? '—' : `${model.formatNumber(Math.abs(run))}${model.unitSuffix}`;
           break;
         case 'grade':
+          // Grade is rise over the horizontal distance covered, so the run is
+          // taken as a magnitude: the sign must say "rises" or "falls" from a
+          // to b, not which of the two happens to be nearer the camera.
           text =
             run == null || Math.abs(run) < 1e-9
               ? '—'
-              : `GRADE ${model.formatGrade(rise / run)}`;
+              : `GRADE ${model.formatGrade(rise / Math.abs(run))}`;
           break;
         case 'change':
           text = model.formatChange(rise);

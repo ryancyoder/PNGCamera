@@ -133,7 +133,14 @@
             <span>Horizontal distance</span>
             <input type="text" inputmode="decimal" id="in-distance" value="40.00">
           </label>
-          <p class="hint">Point B must be the <strong>farther</strong> of the two.</p>
+          <label class="field">
+            <span>Point B is</span>
+            <select id="in-known-side">
+              <option value="farther" selected>Farther from you than the origin</option>
+              <option value="nearer">Nearer to you than the origin</option>
+            </select>
+            <small>Photographing a house from its yard puts the foundation at the far end, so Point B is usually the nearer one.</small>
+          </label>
         </div>
 
         <div class="derived" id="derived-grade">
@@ -204,9 +211,14 @@
           <span>Ruler style</span>
           <select id="in-style">
             <option value="slope" selected>Follow the grade (staircase)</option>
+            <option value="foundation">Foundation — up the wall above 0, grade below</option>
             <option value="staff">Levelling staff at one distance</option>
             <option value="both">Both</option>
           </select>
+          <small id="style-note" hidden>
+            Above the zero line the increments run straight up at the origin's own
+            distance. Below it they project out across the grade.
+          </small>
         </label>
 
         <label class="field field-slider" id="wrap-rung-width">

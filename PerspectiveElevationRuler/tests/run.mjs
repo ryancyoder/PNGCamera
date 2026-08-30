@@ -9,6 +9,7 @@ import { PerspectiveProjection } from '../src/core/PerspectiveProjection.js';
 import { calibrate, solveFromPitch, calibrationContext } from '../src/core/PerspectiveCalibration.js';
 import { ElevationModel } from '../src/core/ElevationModel.js';
 import { ElevationRuler } from '../src/core/ElevationRuler.js';
+import { MeasurementAnnotation } from '../src/core/MeasurementAnnotation.js';
 import { DEG } from '../src/core/Geometry.js';
 
 let passed = 0;
@@ -252,6 +253,31 @@ group('ElevationModel', () => {
   ok('0.25 ft increment over ±1 ft gives 9 levels', fine.levels().length === 9);
 });
 
+group('Grade direction', () => {
+  const base = { originElevation: 100, knownElevation: 97, horizontalDistance: 40 };
+  const farther = new ElevationModel({ ...base, knownIsFarther: true });
+  const nearer = new ElevationModel({ ...base, knownIsFarther: false });
+
+  // Both describe the same pair of points: the known point is 3 ft lower.
+  close('displayed grade is the same either way', farther.slope, nearer.slope, 1e-12);
+  ok('displayed grade falls towards the known point', farther.slope < 0);
+
+  // But along the line of sight they are opposites: if the lower point is
+  // nearer the camera, the ground RISES as it goes away.
+  close('sight grade falls away when the known point is farther', farther.slopeAlongSight, -0.075, 1e-12);
+  close('sight grade rises away when the known point is nearer', nearer.slopeAlongSight, 0.075, 1e-12);
+
+  // The ruler must follow the sight grade, or it climbs the wrong way.
+  const cam = makeCamera({ fovDeg: 60, pitchDeg: 10, cameraHeight: 5.5 });
+  const uphill = new ElevationRuler({ projection: cam, model: nearer, originDistance: 70 });
+  ok('a level below the origin sits nearer the camera', uphill.distanceForOffset(-2) < 70);
+  ok('a level above the origin sits farther away', uphill.distanceForOffset(2) > 70);
+
+  const downhill = new ElevationRuler({ projection: cam, model: farther, originDistance: 30 });
+  ok('and the other way round when the known point is farther',
+     downhill.distanceForOffset(-2) > 30 && downhill.distanceForOffset(2) < 30);
+});
+
 group('ElevationRuler — perspective spacing', () => {
   const cam = makeCamera({ fovDeg: 60, pitchDeg: 12, cameraHeight: 5.5 });
   const model = new ElevationModel({
@@ -313,6 +339,177 @@ group('ElevationRuler — perspective spacing', () => {
   ok('tilted up, graduations converge on the vanishing point above', monotonic(up, -1));
 });
 
+group('Calibration — the origin may be the FARTHER point', () => {
+  // Standing in the yard photographing a house: the foundation (the natural
+  // origin) is the far thing, and the known grade shot is nearer the camera.
+  const truth = { fovDeg: 62, pitchDeg: 9, cameraHeight: 5.5 };
+  const cam = makeCamera(truth);
+  const originDistance = 70;      // the foundation, up the slope and away
+  const knownDistance = 30;       // a grade shot out in the yard, nearer
+  const originElevation = 100;
+  const knownElevation = 97;      // 3 ft below the foundation
+  const horizontalDistance = 40;
+
+  const originPoint = cam.projectPlane(0, originDistance);
+  const knownPoint = cam.projectPlane(knownElevation - originElevation, knownDistance);
+
+  const base = {
+    ...IMAGE,
+    fovDeg: truth.fovDeg,
+    originPoint,
+    knownPoint,
+    originElevation,
+    knownElevation,
+    horizontalDistance,
+  };
+
+  // Declaring the wrong order must not quietly invent a plausible camera.
+  const wrongWay = calibrate({ ...base, knownIsFarther: true, mode: 'height', value: truth.cameraHeight });
+  const wrongOk =
+    wrongWay.ok &&
+    Math.abs(wrongWay.solution.originDistance - originDistance) < 1 &&
+    Math.abs(wrongWay.solution.cameraHeight - truth.cameraHeight) < 0.1;
+  ok('declaring the wrong near/far order does not reproduce the scene', !wrongOk);
+
+  const r = calibrate({ ...base, knownIsFarther: false, mode: 'height', value: truth.cameraHeight });
+  ok('calibrates with the origin as the far point', r.ok, r.reason);
+  close('recovers camera height', r.solution.cameraHeight, truth.cameraHeight, 1e-3);
+  close('recovers pitch', r.solution.pitchRad / DEG, truth.pitchDeg, 1e-3);
+  close('recovers the origin distance', r.solution.originDistance, originDistance, 1e-2);
+  close('recovers the known point distance', r.solution.knownDistance, knownDistance, 1e-2);
+  ok('the known point really is nearer', r.solution.knownDistance < r.solution.originDistance);
+
+  // Both taps still have to land back exactly where the user put them.
+  const a = r.projection.projectPlane(0, r.solution.originDistance);
+  const b = r.projection.projectPlane(-3, r.solution.knownDistance);
+  ok(
+    'both taps stay pinned when the origin is farthest',
+    Math.hypot(a.x - originPoint.x, a.y - originPoint.y) < 0.1 &&
+      Math.hypot(b.x - knownPoint.x, b.y - knownPoint.y) < 0.1,
+  );
+});
+
+group('Foundation ruler — vertical above the datum, grade below', () => {
+  const cam = makeCamera({ fovDeg: 62, pitchDeg: 9, cameraHeight: 5.5 });
+  const originDistance = 70;
+  const model = new ElevationModel({
+    originElevation: 100,
+    knownElevation: 97,
+    horizontalDistance: 40,
+    increment: 1,
+    range: 8,
+    knownIsFarther: false, // the yard shot is nearer than the foundation
+  });
+  const ruler = new ElevationRuler({ projection: cam, model, originDistance });
+  const { vertical, grade } = ruler.foundationRungs();
+
+  ok('produces an upright half', vertical.length > 3, `got ${vertical.length}`);
+  ok('produces a grade half', grade.length > 3, `got ${grade.length}`);
+
+  ok('everything upright is above the datum', vertical.every((r) => r.Y > 0));
+  ok('everything on the grade is at or below the datum', grade.every((r) => r.Y <= 0));
+  ok('the datum belongs to the grade half exactly once',
+     grade.filter((r) => r.Y === 0).length === 1);
+
+  // The whole point: above the datum the horizontal distance does not change.
+  ok(
+    'upright rungs all stay at the foundation distance',
+    vertical.every((r) => Math.abs(r.Z - originDistance) < 1e-9),
+    vertical.map((r) => r.Z.toFixed(3)).join(', '),
+  );
+  // ...and below it they march out across the grade.
+  ok(
+    'grade rungs sit where the ground reaches each level',
+    grade.every((r) => Math.abs(r.Z - (originDistance + r.Y / model.slopeAlongSight)) < 1e-6),
+  );
+  ok('the grade half recedes, it does not stack', new Set(grade.map((r) => r.Z.toFixed(4))).size === grade.length);
+
+  // Holding the horizontal distance fixed keeps the apparent width nearly
+  // constant, but not exactly: a camera tilted down is fractionally closer to
+  // the top of a wall than its foot, so the rungs widen going up. The grade
+  // half, actually receding, changes width by far more.
+  const widths = vertical.map((r) => r.screenWidth);
+  const spread = (a) => (Math.max(...a) - Math.min(...a)) / (a.reduce((x, y) => x + y, 0) / a.length);
+  ok('upright rungs hold their width', spread(widths) < 0.05, `spread ${(spread(widths) * 100).toFixed(1)}%`);
+  ok('upright rungs widen towards the top, as a tilted camera sees a wall',
+     widths.every((w, i) => i === 0 || w > widths[i - 1]));
+  const gradeWidths = grade.map((r) => r.screenWidth);
+  ok('grade rungs change width a lot, because they really recede',
+     spread(gradeWidths) > 0.5, `spread ${(spread(gradeWidths) * 100).toFixed(1)}%`);
+
+  // Equal steps up a wall are still projected, never evenly spaced in pixels.
+  const gaps = [];
+  for (let i = 1; i < vertical.length; i++) {
+    gaps.push(Math.hypot(
+      vertical[i].centre.x - vertical[i - 1].centre.x,
+      vertical[i].centre.y - vertical[i - 1].centre.y,
+    ));
+  }
+  ok('the wall is projected, not evenly divided', Math.max(...gaps) / Math.min(...gaps) > 1.02);
+
+  // The two halves must meet, or the ruler visibly breaks at the zero line.
+  const datum = cam.projectPlane(0, originDistance);
+  const post = ruler.foundationPost(vertical);
+  ok('the upright post starts on the datum',
+     Math.hypot(post.a.x - datum.x, post.a.y - datum.y) < 1e-6);
+  const zeroRung = grade.find((r) => r.Y === 0);
+  ok('both halves meet at the datum',
+     Math.hypot(zeroRung.centre.x - datum.x, zeroRung.centre.y - datum.y) < 1e-6);
+
+  // The ground line must stop at the foundation — above it is the building.
+  const ground = ruler.groundLine({ maxOffset: 0 });
+  ok('the ground line stops at the datum',
+     ground.every((pt) => ruler.offsetAtDistance(pt.Z) <= 1e-9));
+  ok('the ground line still exists below the datum', ground.length > 5);
+});
+
+group('Foundation measurements agree with the foundation ruler', () => {
+  const cam = makeCamera({ fovDeg: 62, pitchDeg: 9, cameraHeight: 5.5 });
+  const originDistance = 70;
+  const model = new ElevationModel({
+    originElevation: 100,
+    knownElevation: 97,
+    horizontalDistance: 40,
+    increment: 1,
+    range: 8,
+    knownIsFarther: false, // the yard shot is nearer than the foundation
+  });
+
+  const read = (imagePoint) =>
+    new MeasurementAnnotation({ imagePoint, mode: 'foundation' })
+      .solve(cam, model, originDistance);
+
+  // A point up the wall: 6 ft above the foundation, at the foundation distance.
+  const wall = read(cam.projectPlane(6, originDistance));
+  ok('a wall point reads', wall.valid, wall.reason);
+  close('  elevation up the wall', wall.elevation, 106, 1e-6);
+  close('  stays at the foundation distance', wall.distance, originDistance, 1e-6);
+
+  // A point out in the yard, on the grade, 2 ft below the foundation.
+  const yardZ = originDistance + -2 / model.slopeAlongSight;
+  const yard = read(cam.projectPlane(-2, yardZ));
+  ok('a yard point reads', yard.valid, yard.reason);
+  close('  elevation on the grade', yard.elevation, 98, 1e-6);
+  close('  distance out across the grade', yard.distance, yardZ, 1e-6);
+  ok('the yard point is nearer than the foundation', yard.distance < originDistance);
+
+  // The rule must be continuous where the two halves meet.
+  const datum = read(cam.projectPlane(0, originDistance));
+  close('the datum itself reads zero change', datum.elevation, 100, 1e-6);
+  close('the datum sits at the foundation distance', datum.distance, originDistance, 1e-6);
+
+  // And 'ground' mode must still ignore the wall, or the modes are the same.
+  const asGround = new MeasurementAnnotation({
+    imagePoint: cam.projectPlane(6, originDistance),
+    mode: 'ground',
+  }).solve(cam, model, originDistance);
+  ok(
+    'ground mode reads the same pixel differently',
+    !asGround.valid || Math.abs(asGround.elevation - 106) > 0.5,
+    `ground mode gave ${asGround.elevation}`,
+  );
+});
+
 group('Guard rails', () => {
   const bad = calibrate({
     ...IMAGE,
@@ -344,7 +541,7 @@ group('Guard rails', () => {
     deltaElevation: 3,
     horizontalDistance: 40,
   });
-  ok('a pitch at the horizon has no solution', solveFromPitch(ctx.alphaA, ctx) === null);
+  ok('a pitch at the horizon has no solution', solveFromPitch(ctx.alphaNear, ctx) === null);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

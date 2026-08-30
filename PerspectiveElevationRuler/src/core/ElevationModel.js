@@ -17,6 +17,7 @@ export class ElevationModel {
     range = 10,
     unitSuffix = "'",
     decimals = 2,
+    knownIsFarther = true,
   } = {}) {
     this.originElevation = originElevation;
     this.knownElevation = knownElevation;
@@ -25,6 +26,7 @@ export class ElevationModel {
     this.range = range;
     this.unitSuffix = unitSuffix;
     this.decimals = decimals;
+    this.knownIsFarther = knownIsFarther;
   }
 
   /** Elevation difference between the two measured points. */
@@ -32,10 +34,25 @@ export class ElevationModel {
     return this.knownElevation - this.originElevation;
   }
 
-  /** Rise over run along the line of sight. */
+  /**
+   * Rise over run walking from the origin towards the known point. Positive
+   * means the known point is the higher of the two. This is the grade the user
+   * entered and the one shown on screen.
+   */
   get slope() {
     if (!(this.horizontalDistance > 0)) return 0;
     return this.deltaElevation / this.horizontalDistance;
+  }
+
+  /**
+   * Rise per unit of distance AWAY FROM THE CAMERA, which is what the
+   * projection needs. It is the negative of `slope` whenever the known point is
+   * the nearer of the two — walking towards the known point then walks towards
+   * the camera. Getting this wrong builds the ruler backwards, running it
+   * uphill where the ground falls.
+   */
+  get slopeAlongSight() {
+    return this.knownIsFarther ? this.slope : -this.slope;
   }
 
   get gradePercent() {
@@ -122,6 +139,7 @@ export class ElevationModel {
       range: this.range,
       unitSuffix: this.unitSuffix,
       decimals: this.decimals,
+      knownIsFarther: this.knownIsFarther,
     };
   }
 }

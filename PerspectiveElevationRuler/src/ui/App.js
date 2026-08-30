@@ -5,7 +5,7 @@
 // only decides *when* to ask for it.
 
 import { clamp, DEG, RAD, dist, add, scale } from '../core/Geometry.js';
-import { calibrate, solveFromPitch } from '../core/PerspectiveCalibration.js';
+import { calibrate, solveFromPitch, pitchDomain } from '../core/PerspectiveCalibration.js';
 import { ElevationModel } from '../core/ElevationModel.js';
 import { ElevationRuler } from '../core/ElevationRuler.js';
 import { AnnotationManager } from '../core/AnnotationManager.js';
@@ -38,6 +38,7 @@ export class App {
       solveMode: 'height',
       solveValue: 5.5,
       rulerStyle: 'slope',
+      knownIsFarther: true,
       rungWidth: 10,
       staffDistance: null,
       opacity: 1,
@@ -163,6 +164,10 @@ export class App {
     $('in-style').onchange = (e) => {
       this.state.rulerStyle = e.target.value;
       this._syncStyleFields();
+      this._recalculate();
+    };
+    $('in-known-side').onchange = (e) => {
+      this.state.knownIsFarther = e.target.value === 'farther';
       this._recalculate();
     };
     $('in-rung-width').oninput = (e) => {
@@ -433,6 +438,7 @@ export class App {
         imagePoint: snapped,
         label: `POINT ${String.fromCharCode(67 + this.annotations.measurements.length)}`,
         labelOffset: this._defaultLabelOffset(),
+        mode: this._measurementMode,
       });
       this._select(point.id);
       this._arm('select');
@@ -523,6 +529,11 @@ export class App {
   // Calibration
   // ======================================================================
 
+  /** How a tapped point should be turned into an elevation, given the ruler. */
+  get _measurementMode() {
+    return this.state.rulerStyle === 'foundation' ? 'foundation' : 'ground';
+  }
+
   _buildModel() {
     return new ElevationModel({
       originElevation: this.state.originElevation,
@@ -531,6 +542,7 @@ export class App {
       increment: this.state.increment,
       range: this.state.range,
       unitSuffix: this.state.unit === 'm' ? 'm' : "'",
+      knownIsFarther: this.state.knownIsFarther,
     });
   }
 
@@ -558,6 +570,7 @@ export class App {
         originElevation: this.state.originElevation,
         knownElevation: this.state.knownElevation,
         horizontalDistance: this.state.horizontalDistance,
+        knownIsFarther: this.state.knownIsFarther,
         mode: this.state.solveMode,
         value: this.state.solveMode === 'pitch' ? this.state.solveValue * DEG : this.state.solveValue,
       });
@@ -579,6 +592,9 @@ export class App {
     }
 
     this._relayoutLabels();
+    for (const point of this.annotations.measurements) point.mode = this._measurementMode;
+    // The origin is the foundation in that workflow; name it so on the drawing.
+    if (origin) origin.label = this.state.rulerStyle === 'foundation' ? 'FOUNDATION' : 'ORIGIN';
     this.annotations.solveAll(this.projection, this.model, this.solution?.originDistance ?? 0);
     if (!quiet) this._syncSolveSlider();
     this._syncDerived();
@@ -597,8 +613,7 @@ export class App {
     const mode = this.state.solveMode;
     if (!this.context) return null;
     const ctx = this.context;
-    const lo = Math.max(ctx.alphaA, ctx.alphaB) - Math.PI / 2 + 1e-4;
-    const hi = Math.min(ctx.alphaA, ctx.alphaB) + Math.PI / 2 - 1e-4;
+    const { lo, hi } = pitchDomain(ctx);
     if (!(hi > lo)) return null;
 
     // Slider values are snapped onto a hundredths grid so the user can land on
@@ -767,6 +782,7 @@ export class App {
     $('in-range').value = String(s.range);
     $('out-range').textContent = `±${s.range}${this._suffix}`;
     $('in-style').value = s.rulerStyle;
+    $('in-known-side').value = s.knownIsFarther ? 'farther' : 'nearer';
     $('in-rung-width').value = String(s.rungWidth);
     $('out-rung-width').textContent = `${s.rungWidth}${this._suffix}`;
     $('in-label-mode').value = s.labelMode;
@@ -783,9 +799,13 @@ export class App {
   }
 
   _syncStyleFields() {
-    const staff = this.state.rulerStyle !== 'slope' || this.model.isFlat;
+    const foundation = this.state.rulerStyle === 'foundation';
+    // In foundation mode the upright half is pinned to the origin's own
+    // distance — that is the whole point of it — so there is nothing to slide.
+    const staff = !foundation && (this.state.rulerStyle !== 'slope' || this.model.isFlat);
     this.$('wrap-staff-distance').hidden = !staff;
     this.$('wrap-rung-width').hidden = this.state.rulerStyle === 'staff';
+    this.$('style-note').hidden = !foundation;
     if (staff && this.solution) {
       const slider = this.$('in-staff-distance');
       const maxD = Math.max(10, this.solution.originDistance * 4);
@@ -980,6 +1000,7 @@ export class App {
       solveMode: 'height',
       solveValue: 5.5,
       rulerStyle: 'slope',
+      knownIsFarther: true,
       rungWidth: 10,
       staffDistance: null,
       labelMode: 'elevation',

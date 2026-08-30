@@ -15,6 +15,15 @@
 //          elevation increments. Nothing recedes, but the graduations still
 //          compress towards the horizon because they are projected, not drawn.
 //
+//   FOUNDATION  the two joined at the datum, for measuring against a building.
+//          Mark the foundation as the zero line: above it the increments run
+//          straight up the wall at the foundation's own distance, because that
+//          is what "8 ft above the foundation" means — you do not walk backwards
+//          to measure a wall. Below it they project out across the grade, which
+//          is what "2 ft below the foundation" means out in the yard. The two
+//          halves meet exactly at the datum, since the zero rung is the same
+//          point in both.
+//
 // Neither style implies anything about the landscape left or right of the
 // measurement plane, which is why the rungs are a deliberately finite width.
 
@@ -29,14 +38,14 @@ export class ElevationRuler {
 
   /** Distance along the line of sight at which the ground reaches `offset`. */
   distanceForOffset(offset) {
-    const s = this.model.slope;
+    const s = this.model.slopeAlongSight;
     if (Math.abs(s) < 1e-9) return offset === 0 ? this.originDistance : null;
     return this.originDistance + offset / s;
   }
 
   /** Ground elevation offset at a distance along the line of sight. */
   offsetAtDistance(Z) {
-    return this.model.slope * (Z - this.originDistance);
+    return this.model.slopeAlongSight * (Z - this.originDistance);
   }
 
   /**
@@ -105,6 +114,41 @@ export class ElevationRuler {
     return this._prune(out, options);
   }
 
+  /**
+   * Split ruler for measuring against a building.
+   * @returns {{vertical: object[], grade: object[]}} the two halves, already
+   *          pruned. The datum rung belongs to the grade half so it is drawn
+   *          once, and both halves touch it.
+   */
+  foundationRungs(options = {}) {
+    const above = [];
+    const below = [];
+    for (const level of this.model.levels()) {
+      if (level.offset > 0) {
+        // Straight up, at the foundation's own distance from the camera.
+        above.push(this._rung(level, level.offset, this.originDistance, this.rungWidth));
+      } else {
+        // Out across the grade, where the ground actually reaches that level.
+        const Z = this.distanceForOffset(level.offset);
+        if (Z == null || !(Z > 1e-6)) continue;
+        below.push(this._rung(level, level.offset, Z, this.rungWidth));
+      }
+    }
+    // Prune each half on its own: they run in different directions, so a single
+    // depth-ordered pass would interleave them and cull the wrong rungs.
+    return {
+      vertical: this._prune(above, { minSpacing: 2, minWidth: 0, ...options }).sort((a, b) => a.Y - b.Y),
+      grade: this._prune(below, options),
+    };
+  }
+
+  /** The post joining the datum to the top of the vertical half. */
+  foundationPost(rungs) {
+    const datum = this.projection.projectPlane(0, this.originDistance);
+    const top = rungs.length ? rungs[rungs.length - 1].centre : null;
+    return datum && top ? { a: datum, b: top } : null;
+  }
+
   /** Ruler as a levelling rod standing at `Z`. */
   staffRungs(Z = this.originDistance, options = {}) {
     if (!(Z > 1e-6)) return [];
@@ -129,14 +173,16 @@ export class ElevationRuler {
    * renderer can draw it as a polyline (it is straight in the world, and
    * therefore straight in the image, but sampling keeps clipping simple).
    */
-  groundLine({ from = null, to = null, samples = 48 } = {}) {
+  groundLine({ from = null, to = null, samples = 48, maxOffset = null } = {}) {
     const p = this.projection;
     const near = from ?? Math.max(0.5, this.originDistance * 0.15);
     const far = to ?? this.originDistance + this.model.horizontalDistance * 6;
     const pts = [];
     for (let i = 0; i <= samples; i++) {
       const Z = near + ((far - near) * i) / samples;
-      const proj = p.projectPlane(this.offsetAtDistance(Z), Z);
+      const offset = this.offsetAtDistance(Z);
+      if (maxOffset != null && offset > maxOffset + 1e-9) continue;
+      const proj = p.projectPlane(offset, Z);
       if (proj) pts.push({ ...proj, Z });
     }
     return pts;
@@ -158,6 +204,20 @@ export class ElevationRuler {
 
   /** Everything the renderer needs, in one call. */
   build({ style = 'slope', staffDistance = null } = {}) {
+    if (style === 'foundation') {
+      const { vertical, grade } = this.foundationRungs();
+      return {
+        style,
+        // The renderer draws `slope` as a receding staircase and `staff` as an
+        // upright rod, which is exactly the two halves of this ruler.
+        slope: grade,
+        staff: vertical,
+        staffPost: this.foundationPost(vertical),
+        ground: this.groundLine({ maxOffset: 0 }),
+        sight: this.lineOfSight(),
+      };
+    }
+
     const useSlope = style === 'slope' || style === 'both';
     const useStaff = style === 'staff' || style === 'both' || this.model.isFlat;
     return {

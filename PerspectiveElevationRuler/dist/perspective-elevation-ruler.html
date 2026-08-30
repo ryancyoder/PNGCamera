@@ -758,7 +758,14 @@ input[type="range"]::-moz-range-thumb {
             <span>Horizontal distance</span>
             <input type="text" inputmode="decimal" id="in-distance" value="40.00">
           </label>
-          <p class="hint">Point B must be the <strong>farther</strong> of the two.</p>
+          <label class="field">
+            <span>Point B is</span>
+            <select id="in-known-side">
+              <option value="farther" selected>Farther from you than the origin</option>
+              <option value="nearer">Nearer to you than the origin</option>
+            </select>
+            <small>Photographing a house from its yard puts the foundation at the far end, so Point B is usually the nearer one.</small>
+          </label>
         </div>
 
         <div class="derived" id="derived-grade">
@@ -829,9 +836,14 @@ input[type="range"]::-moz-range-thumb {
           <span>Ruler style</span>
           <select id="in-style">
             <option value="slope" selected>Follow the grade (staircase)</option>
+            <option value="foundation">Foundation — up the wall above 0, grade below</option>
             <option value="staff">Levelling staff at one distance</option>
             <option value="both">Both</option>
           </select>
+          <small id="style-note" hidden>
+            Above the zero line the increments run straight up at the origin's own
+            distance. Below it they project out across the grade.
+          </small>
         </label>
 
         <label class="field field-slider" id="wrap-rung-width">
@@ -1330,17 +1342,24 @@ class PerspectiveProjection {
 //
 // and simple trigonometry from the camera at height h gives
 //
-//     tan(beta_A) = (h - 0) / Z_A            (the origin, elevation 0)
-//     tan(beta_B) = (h - dY) / (Z_A + D)     (the known point)
+//     tan(beta_near) = (h - Y_near) / Z_near
+//     tan(beta_far)  = (h - Y_far)  / Z_near + D
 //
-// Two equations. Three unknowns (theta, h, Z_A) — genuinely one short, which is
-// why the app offers a fine-tune control rather than pretending it can solve
+// where Y is elevation relative to the origin, so Y_origin is 0 by definition.
+// Note "near" and "far", not "origin" and "known": either reference point may
+// be the closer one. Photographing a house from its yard puts the foundation —
+// the natural origin — at the FAR end of the sight line, so assuming the origin
+// is nearest would make that whole workflow impossible to calibrate.
+//
+// Two equations. Three unknowns (theta, h, Z_near) — genuinely one short, which
+// is why the app offers a fine-tune control rather than pretending it can solve
 // everything. Fixing any ONE of the three closes the system.
 //
 // Fixing `theta` is the nicest case because it is linear:
 //
-//     h * cot(beta_A) + D = (h - dY) * cot(beta_B)
-//  => h = (-dY * cot(beta_B) - D) / (cot(beta_A) - cot(beta_B))
+//     (h - Y_far)*cot(beta_far) - (h - Y_near)*cot(beta_near) = D
+//  => h = (D + Y_far*cot(beta_far) - Y_near*cot(beta_near))
+//         / (cot(beta_far) - cot(beta_near))
 //
 // So `solveFromPitch` is closed form, and the other two modes ("I know roughly
 // how high the camera was" / "I know roughly how far away the origin is") are
@@ -1364,14 +1383,25 @@ function calibrationContext({
   knownPoint,
   deltaElevation,
   horizontalDistance,
+  knownIsFarther = true,
 }) {
   const focalPx = imageWidth / 2 / Math.tan((fovDeg * DEG) / 2);
-  const d = normalize(sub(knownPoint, originPoint));
+
+  // The image frame runs from the near reference point to the far one, because
+  // increasing distance must mean increasing `t`. Which of the two is which is
+  // the user's call, not an assumption.
+  const nearPoint = knownIsFarther ? originPoint : knownPoint;
+  const farPoint = knownIsFarther ? knownPoint : originPoint;
+  const nearY = knownIsFarther ? 0 : deltaElevation;
+  const farY = knownIsFarther ? deltaElevation : 0;
+
+  const d = normalize(sub(farPoint, nearPoint));
   const n = perp(d);
   const centre = { x: imageWidth / 2, y: imageHeight / 2 };
-  const P0 = add(originPoint, scale(d, dot(sub(centre, originPoint), d)));
-  const tA = dot(sub(originPoint, P0), d);
-  const tB = dot(sub(knownPoint, P0), d);
+  const P0 = add(nearPoint, scale(d, dot(sub(centre, nearPoint), d)));
+  const tNear = dot(sub(nearPoint, P0), d);
+  const tFar = dot(sub(farPoint, P0), d);
+
   return {
     imageWidth,
     imageHeight,
@@ -1380,14 +1410,19 @@ function calibrationContext({
     d,
     n,
     P0,
-    tA,
-    tB,
-    alphaA: Math.atan2(tA, focalPx),
-    alphaB: Math.atan2(tB, focalPx),
+    tNear,
+    tFar,
+    alphaNear: Math.atan2(tNear, focalPx),
+    alphaFar: Math.atan2(tFar, focalPx),
+    nearY,
+    farY,
+    knownIsFarther,
     deltaElevation,
     horizontalDistance,
     originPoint: { ...originPoint },
     knownPoint: { ...knownPoint },
+    nearPoint: { ...nearPoint },
+    farPoint: { ...farPoint },
   };
 }
 
@@ -1396,35 +1431,43 @@ function calibrationContext({
  * @returns {{pitchRad,cameraHeight,originDistance,knownDistance}|null}
  */
 function solveFromPitch(pitchRad, ctx) {
-  const { alphaA, alphaB, deltaElevation: dY, horizontalDistance: D } = ctx;
-  const betaA = pitchRad - alphaA;
-  const betaB = pitchRad - alphaB;
-  const tanA = Math.tan(betaA);
-  const tanB = Math.tan(betaB);
-  if (!Number.isFinite(tanA) || !Number.isFinite(tanB)) return null;
-  if (Math.abs(tanA) < EPS || Math.abs(tanB) < EPS) return null; // ray at the horizon
-  const cotA = 1 / tanA;
-  const cotB = 1 / tanB;
-  const den = cotA - cotB;
+  const { alphaNear, alphaFar, nearY, farY, horizontalDistance: D, knownIsFarther } = ctx;
+  const betaNear = pitchRad - alphaNear;
+  const betaFar = pitchRad - alphaFar;
+  const tanNear = Math.tan(betaNear);
+  const tanFar = Math.tan(betaFar);
+  if (!Number.isFinite(tanNear) || !Number.isFinite(tanFar)) return null;
+  if (Math.abs(tanNear) < EPS || Math.abs(tanFar) < EPS) return null; // ray at the horizon
+  const cotNear = 1 / tanNear;
+  const cotFar = 1 / tanFar;
+  const den = cotFar - cotNear;
   if (!Number.isFinite(den) || Math.abs(den) < 1e-9) return null;
 
-  const h = (-dY * cotB - D) / den;
-  const zA = h * cotA;
-  const zB = (h - dY) * cotB;
-  if (![h, zA, zB].every(Number.isFinite)) return null;
+  const h = (D + farY * cotFar - nearY * cotNear) / den;
+  const zNear = (h - nearY) * cotNear;
+  const zFar = (h - farY) * cotFar;
+  if (![h, zNear, zFar].every(Number.isFinite)) return null;
   // Both reference points must be in front of the camera, and the far one must
   // really be farther — otherwise the solution is a mirror-image artefact.
-  if (!(zA > 1e-6) || !(zB > 1e-6)) return null;
-  if (Math.abs(zB - (zA + D)) > 1e-6 * Math.max(1, Math.abs(zB))) return null;
-  return { pitchRad, cameraHeight: h, originDistance: zA, knownDistance: zB };
+  if (!(zNear > 1e-6) || !(zFar > 1e-6)) return null;
+  if (Math.abs(zFar - (zNear + D)) > 1e-6 * Math.max(1, Math.abs(zFar))) return null;
+
+  return {
+    pitchRad,
+    cameraHeight: h,
+    originDistance: knownIsFarther ? zNear : zFar,
+    knownDistance: knownIsFarther ? zFar : zNear,
+    nearDistance: zNear,
+    farDistance: zFar,
+  };
 }
 
 /** The open interval of pitches for which a solution can exist. */
 function pitchDomain(ctx) {
   // beta_A must be a real depression angle strictly inside (-90, 90) degrees,
   // and the same for beta_B.
-  const lo = Math.max(ctx.alphaA, ctx.alphaB) - Math.PI / 2 + EPS;
-  const hi = Math.min(ctx.alphaA, ctx.alphaB) + Math.PI / 2 - EPS;
+  const lo = Math.max(ctx.alphaNear, ctx.alphaFar) - Math.PI / 2 + EPS;
+  const hi = Math.min(ctx.alphaNear, ctx.alphaFar) + Math.PI / 2 - EPS;
   return { lo, hi };
 }
 
@@ -1555,6 +1598,7 @@ function calibrate(input) {
     originElevation,
     knownElevation,
     horizontalDistance,
+    knownIsFarther = true,
     mode = 'height',
     value = 5.5,
   } = input;
@@ -1581,6 +1625,7 @@ function calibrate(input) {
     knownPoint,
     deltaElevation: knownElevation - originElevation,
     horizontalDistance,
+    knownIsFarther,
   });
 
   let solution = null;
@@ -1604,8 +1649,9 @@ function calibrate(input) {
     fovDeg,
     pitchRad: solution.pitchRad,
     cameraHeight: solution.cameraHeight,
-    losA: originPoint,
-    losB: knownPoint,
+    // The sight line always runs near -> far, so `d` points away from camera.
+    losA: ctx.nearPoint,
+    losB: ctx.farPoint,
   });
 
   return { ok: true, projection, solution, context: ctx };
@@ -1633,6 +1679,7 @@ class ElevationModel {
     range = 10,
     unitSuffix = "'",
     decimals = 2,
+    knownIsFarther = true,
   } = {}) {
     this.originElevation = originElevation;
     this.knownElevation = knownElevation;
@@ -1641,6 +1688,7 @@ class ElevationModel {
     this.range = range;
     this.unitSuffix = unitSuffix;
     this.decimals = decimals;
+    this.knownIsFarther = knownIsFarther;
   }
 
   /** Elevation difference between the two measured points. */
@@ -1648,10 +1696,25 @@ class ElevationModel {
     return this.knownElevation - this.originElevation;
   }
 
-  /** Rise over run along the line of sight. */
+  /**
+   * Rise over run walking from the origin towards the known point. Positive
+   * means the known point is the higher of the two. This is the grade the user
+   * entered and the one shown on screen.
+   */
   get slope() {
     if (!(this.horizontalDistance > 0)) return 0;
     return this.deltaElevation / this.horizontalDistance;
+  }
+
+  /**
+   * Rise per unit of distance AWAY FROM THE CAMERA, which is what the
+   * projection needs. It is the negative of `slope` whenever the known point is
+   * the nearer of the two — walking towards the known point then walks towards
+   * the camera. Getting this wrong builds the ruler backwards, running it
+   * uphill where the ground falls.
+   */
+  get slopeAlongSight() {
+    return this.knownIsFarther ? this.slope : -this.slope;
   }
 
   get gradePercent() {
@@ -1738,6 +1801,7 @@ class ElevationModel {
       range: this.range,
       unitSuffix: this.unitSuffix,
       decimals: this.decimals,
+      knownIsFarther: this.knownIsFarther,
     };
   }
 }
@@ -1763,6 +1827,15 @@ class ElevationModel {
 //          elevation increments. Nothing recedes, but the graduations still
 //          compress towards the horizon because they are projected, not drawn.
 //
+//   FOUNDATION  the two joined at the datum, for measuring against a building.
+//          Mark the foundation as the zero line: above it the increments run
+//          straight up the wall at the foundation's own distance, because that
+//          is what "8 ft above the foundation" means — you do not walk backwards
+//          to measure a wall. Below it they project out across the grade, which
+//          is what "2 ft below the foundation" means out in the yard. The two
+//          halves meet exactly at the datum, since the zero rung is the same
+//          point in both.
+//
 // Neither style implies anything about the landscape left or right of the
 // measurement plane, which is why the rungs are a deliberately finite width.
 
@@ -1777,14 +1850,14 @@ class ElevationRuler {
 
   /** Distance along the line of sight at which the ground reaches `offset`. */
   distanceForOffset(offset) {
-    const s = this.model.slope;
+    const s = this.model.slopeAlongSight;
     if (Math.abs(s) < 1e-9) return offset === 0 ? this.originDistance : null;
     return this.originDistance + offset / s;
   }
 
   /** Ground elevation offset at a distance along the line of sight. */
   offsetAtDistance(Z) {
-    return this.model.slope * (Z - this.originDistance);
+    return this.model.slopeAlongSight * (Z - this.originDistance);
   }
 
   /**
@@ -1853,6 +1926,41 @@ class ElevationRuler {
     return this._prune(out, options);
   }
 
+  /**
+   * Split ruler for measuring against a building.
+   * @returns {{vertical: object[], grade: object[]}} the two halves, already
+   *          pruned. The datum rung belongs to the grade half so it is drawn
+   *          once, and both halves touch it.
+   */
+  foundationRungs(options = {}) {
+    const above = [];
+    const below = [];
+    for (const level of this.model.levels()) {
+      if (level.offset > 0) {
+        // Straight up, at the foundation's own distance from the camera.
+        above.push(this._rung(level, level.offset, this.originDistance, this.rungWidth));
+      } else {
+        // Out across the grade, where the ground actually reaches that level.
+        const Z = this.distanceForOffset(level.offset);
+        if (Z == null || !(Z > 1e-6)) continue;
+        below.push(this._rung(level, level.offset, Z, this.rungWidth));
+      }
+    }
+    // Prune each half on its own: they run in different directions, so a single
+    // depth-ordered pass would interleave them and cull the wrong rungs.
+    return {
+      vertical: this._prune(above, { minSpacing: 2, minWidth: 0, ...options }).sort((a, b) => a.Y - b.Y),
+      grade: this._prune(below, options),
+    };
+  }
+
+  /** The post joining the datum to the top of the vertical half. */
+  foundationPost(rungs) {
+    const datum = this.projection.projectPlane(0, this.originDistance);
+    const top = rungs.length ? rungs[rungs.length - 1].centre : null;
+    return datum && top ? { a: datum, b: top } : null;
+  }
+
   /** Ruler as a levelling rod standing at `Z`. */
   staffRungs(Z = this.originDistance, options = {}) {
     if (!(Z > 1e-6)) return [];
@@ -1877,14 +1985,16 @@ class ElevationRuler {
    * renderer can draw it as a polyline (it is straight in the world, and
    * therefore straight in the image, but sampling keeps clipping simple).
    */
-  groundLine({ from = null, to = null, samples = 48 } = {}) {
+  groundLine({ from = null, to = null, samples = 48, maxOffset = null } = {}) {
     const p = this.projection;
     const near = from ?? Math.max(0.5, this.originDistance * 0.15);
     const far = to ?? this.originDistance + this.model.horizontalDistance * 6;
     const pts = [];
     for (let i = 0; i <= samples; i++) {
       const Z = near + ((far - near) * i) / samples;
-      const proj = p.projectPlane(this.offsetAtDistance(Z), Z);
+      const offset = this.offsetAtDistance(Z);
+      if (maxOffset != null && offset > maxOffset + 1e-9) continue;
+      const proj = p.projectPlane(offset, Z);
       if (proj) pts.push({ ...proj, Z });
     }
     return pts;
@@ -1906,6 +2016,20 @@ class ElevationRuler {
 
   /** Everything the renderer needs, in one call. */
   build({ style = 'slope', staffDistance = null } = {}) {
+    if (style === 'foundation') {
+      const { vertical, grade } = this.foundationRungs();
+      return {
+        style,
+        // The renderer draws `slope` as a receding staircase and `staff` as an
+        // upright rod, which is exactly the two halves of this ruler.
+        slope: grade,
+        staff: vertical,
+        staffPost: this.foundationPost(vertical),
+        ground: this.groundLine({ maxOffset: 0 }),
+        sight: this.lineOfSight(),
+      };
+    }
+
     const useSlope = style === 'slope' || style === 'both';
     const useStaff = style === 'staff' || style === 'both' || this.model.isFlat;
     return {
@@ -1943,9 +2067,11 @@ class MeasurementAnnotation {
   /**
    * @param {object} o
    * @param {{x,y}}  o.imagePoint  where the marker sits, in photo pixels
-   * @param {'ground'|'depth'} o.mode how to turn the view ray into an elevation:
-   *        'ground' intersects the calibrated grade, 'depth' reads the ray at a
-   *        fixed distance along the line of sight (a virtual levelling staff).
+   * @param {'ground'|'depth'|'foundation'} o.mode how to turn the view ray into
+   *        an elevation: 'ground' intersects the calibrated grade, 'depth' reads
+   *        the ray at a fixed distance along the line of sight (a virtual
+   *        levelling staff), and 'foundation' switches between the two at the
+   *        datum — up the wall above it, out across the grade below it.
    */
   constructor({
     id = newId(),
@@ -2010,16 +2136,30 @@ class MeasurementAnnotation {
       return this;
     }
 
-    const hit =
-      this.mode === 'depth' && this.fixedDistance != null
-        ? projection.elevationAtDepth(t, this.fixedDistance)
-        : projection.intersectGround(t, model.slope, originDistance);
+    let hit;
+    if (this.mode === 'foundation') {
+      // Read against the wall above the datum and across the grade below it, so
+      // a measurement always agrees with the ruler drawn through the same point.
+      // The test is the wall reading itself: it crosses zero exactly where the
+      // two halves of the ruler meet, so the rule is continuous at the datum.
+      const wall = projection.elevationAtDepth(t, originDistance);
+      hit =
+        wall && wall.Y > 0
+          ? wall
+          : projection.intersectGround(t, model.slopeAlongSight, originDistance);
+    } else if (this.mode === 'depth' && this.fixedDistance != null) {
+      hit = projection.elevationAtDepth(t, this.fixedDistance);
+    } else {
+      hit = projection.intersectGround(t, model.slopeAlongSight, originDistance);
+    }
 
     if (!hit) {
       this.reason =
         this.mode === 'depth'
           ? 'No reading at that distance.'
-          : 'That sight line never meets the calibrated grade — it is at or beyond the horizon.';
+          : this.mode === 'foundation'
+            ? 'Below the foundation, that sight line never meets the grade — it is at or beyond the horizon.'
+            : 'That sight line never meets the calibrated grade — it is at or beyond the horizon.';
       return this;
     }
 
@@ -2101,10 +2241,13 @@ class DimensionAnnotation {
           text = run == null ? '—' : `${model.formatNumber(Math.abs(run))}${model.unitSuffix}`;
           break;
         case 'grade':
+          // Grade is rise over the horizontal distance covered, so the run is
+          // taken as a magnitude: the sign must say "rises" or "falls" from a
+          // to b, not which of the two happens to be nearer the camera.
           text =
             run == null || Math.abs(run) < 1e-9
               ? '—'
-              : `GRADE ${model.formatGrade(rise / run)}`;
+              : `GRADE ${model.formatGrade(rise / Math.abs(run))}`;
           break;
         case 'change':
           text = model.formatChange(rise);
@@ -2750,6 +2893,10 @@ class OverlayRenderer {
     if (!projection || !model || !ruler) return;
 
     const u = imageWidth / 1000; // one "design unit"
+    // Label placement is resolved across the whole overlay, not per element:
+    // the two halves of a foundation ruler meet at the datum, and culling them
+    // independently lets both drop a number in the same place.
+    this._labelSlots = [];
     ctx.save();
     ctx.globalAlpha = options.opacity;
     ctx.lineCap = 'round';
@@ -2777,6 +2924,20 @@ class OverlayRenderer {
   }
 
   // --- primitives ---------------------------------------------------------
+
+  /**
+   * Reserve room for a label. Returns false when something is already there.
+   * `force` is for labels that must never be dropped, such as the datum.
+   */
+  _claimLabelSlot(at, minGap, force = false) {
+    if (!force) {
+      for (const slot of this._labelSlots) {
+        if (Math.hypot(at.x - slot.x, at.y - slot.y) < minGap) return false;
+      }
+    }
+    this._labelSlots.push(at);
+    return true;
+  }
 
   _stroke(ctx, path, { color, width, halo = true, alpha = 1, dash = null }) {
     ctx.save();
@@ -2962,7 +3123,6 @@ class OverlayRenderer {
     // ruler — but overlapping numbers do not, so a label is only drawn once
     // there is room for it clear of the last one.
     const minLabelGap = 26 * u;
-    let lastLabel = null;
 
     for (const r of ordered) {
       const a = fade(r.depth);
@@ -2978,8 +3138,7 @@ class OverlayRenderer {
       const dir = normalize(sub(r.right, r.left));
       const at = add(r.right, scale(dir, 10 * u));
       // The origin is the datum: it is always labelled, whatever else is culled.
-      if (!major && lastLabel && dist(at, lastLabel) < minLabelGap) continue;
-      lastLabel = at;
+      if (!this._claimLabelSlot(at, minLabelGap, major)) continue;
       const text = options.labelMode === 'change' ? r.level.change : r.level.label;
       this._label(ctx, text, at, u, {
         size: major ? 20 : 17,
@@ -2997,7 +3156,6 @@ class OverlayRenderer {
       this._line(ctx, post.a, post.b, { color: PALETTE.rung, width: 2.4 * u, alpha: 0.8 });
     }
     const minStaffGap = 24 * u;
-    let lastStaffLabel = null;
     for (const r of rungs) {
       const major = r.level.isOrigin;
       this._line(ctx, r.left, r.right, {
@@ -3005,11 +3163,10 @@ class OverlayRenderer {
         width: (major ? 3.2 : r.level.isMajor ? 2.2 : 1.3) * u,
         alpha: major ? 1 : r.level.isMajor ? 0.95 : 0.7,
       });
-      if (!options.showLabels || !r.level.isMajor) continue;
+      if (!options.showLabels) continue;
       const dir = normalize(sub(r.right, r.left));
       const at = add(r.right, scale(dir, 8 * u));
-      if (!major && lastStaffLabel && dist(at, lastStaffLabel) < minStaffGap) continue;
-      lastStaffLabel = at;
+      if (!this._claimLabelSlot(at, minStaffGap, major)) continue;
       const text = options.labelMode === 'change' ? r.level.change : r.level.label;
       this._label(ctx, text, at, u, {
         size: major ? 19 : 16,
@@ -3440,6 +3597,7 @@ class App {
       solveMode: 'height',
       solveValue: 5.5,
       rulerStyle: 'slope',
+      knownIsFarther: true,
       rungWidth: 10,
       staffDistance: null,
       opacity: 1,
@@ -3565,6 +3723,10 @@ class App {
     $('in-style').onchange = (e) => {
       this.state.rulerStyle = e.target.value;
       this._syncStyleFields();
+      this._recalculate();
+    };
+    $('in-known-side').onchange = (e) => {
+      this.state.knownIsFarther = e.target.value === 'farther';
       this._recalculate();
     };
     $('in-rung-width').oninput = (e) => {
@@ -3835,6 +3997,7 @@ class App {
         imagePoint: snapped,
         label: `POINT ${String.fromCharCode(67 + this.annotations.measurements.length)}`,
         labelOffset: this._defaultLabelOffset(),
+        mode: this._measurementMode,
       });
       this._select(point.id);
       this._arm('select');
@@ -3925,6 +4088,11 @@ class App {
   // Calibration
   // ======================================================================
 
+  /** How a tapped point should be turned into an elevation, given the ruler. */
+  get _measurementMode() {
+    return this.state.rulerStyle === 'foundation' ? 'foundation' : 'ground';
+  }
+
   _buildModel() {
     return new ElevationModel({
       originElevation: this.state.originElevation,
@@ -3933,6 +4101,7 @@ class App {
       increment: this.state.increment,
       range: this.state.range,
       unitSuffix: this.state.unit === 'm' ? 'm' : "'",
+      knownIsFarther: this.state.knownIsFarther,
     });
   }
 
@@ -3960,6 +4129,7 @@ class App {
         originElevation: this.state.originElevation,
         knownElevation: this.state.knownElevation,
         horizontalDistance: this.state.horizontalDistance,
+        knownIsFarther: this.state.knownIsFarther,
         mode: this.state.solveMode,
         value: this.state.solveMode === 'pitch' ? this.state.solveValue * DEG : this.state.solveValue,
       });
@@ -3981,6 +4151,9 @@ class App {
     }
 
     this._relayoutLabels();
+    for (const point of this.annotations.measurements) point.mode = this._measurementMode;
+    // The origin is the foundation in that workflow; name it so on the drawing.
+    if (origin) origin.label = this.state.rulerStyle === 'foundation' ? 'FOUNDATION' : 'ORIGIN';
     this.annotations.solveAll(this.projection, this.model, this.solution?.originDistance ?? 0);
     if (!quiet) this._syncSolveSlider();
     this._syncDerived();
@@ -3999,8 +4172,7 @@ class App {
     const mode = this.state.solveMode;
     if (!this.context) return null;
     const ctx = this.context;
-    const lo = Math.max(ctx.alphaA, ctx.alphaB) - Math.PI / 2 + 1e-4;
-    const hi = Math.min(ctx.alphaA, ctx.alphaB) + Math.PI / 2 - 1e-4;
+    const { lo, hi } = pitchDomain(ctx);
     if (!(hi > lo)) return null;
 
     // Slider values are snapped onto a hundredths grid so the user can land on
@@ -4169,6 +4341,7 @@ class App {
     $('in-range').value = String(s.range);
     $('out-range').textContent = `±${s.range}${this._suffix}`;
     $('in-style').value = s.rulerStyle;
+    $('in-known-side').value = s.knownIsFarther ? 'farther' : 'nearer';
     $('in-rung-width').value = String(s.rungWidth);
     $('out-rung-width').textContent = `${s.rungWidth}${this._suffix}`;
     $('in-label-mode').value = s.labelMode;
@@ -4185,9 +4358,13 @@ class App {
   }
 
   _syncStyleFields() {
-    const staff = this.state.rulerStyle !== 'slope' || this.model.isFlat;
+    const foundation = this.state.rulerStyle === 'foundation';
+    // In foundation mode the upright half is pinned to the origin's own
+    // distance — that is the whole point of it — so there is nothing to slide.
+    const staff = !foundation && (this.state.rulerStyle !== 'slope' || this.model.isFlat);
     this.$('wrap-staff-distance').hidden = !staff;
     this.$('wrap-rung-width').hidden = this.state.rulerStyle === 'staff';
+    this.$('style-note').hidden = !foundation;
     if (staff && this.solution) {
       const slider = this.$('in-staff-distance');
       const maxD = Math.max(10, this.solution.originDistance * 4);
@@ -4382,6 +4559,7 @@ class App {
       solveMode: 'height',
       solveValue: 5.5,
       rulerStyle: 'slope',
+      knownIsFarther: true,
       rungWidth: 10,
       staffDistance: null,
       labelMode: 'elevation',
