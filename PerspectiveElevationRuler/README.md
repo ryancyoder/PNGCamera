@@ -72,6 +72,22 @@ allowed to start a download. Where the page is embedded in a host that mediates
 saving, the Save button goes through the host instead of offering a link that
 would quietly do nothing.
 
+## Two ways to calibrate
+
+**From a building** (the default). Nothing you have to supply is a horizontal
+distance — the one number that is genuinely hard to know standing in a yard:
+
+1. **Foundation** — tap where the wall meets the ground. This is the zero line.
+2. **Wall height** — tap a point straight above it whose height you know (a
+   course of siding, a door head, the top of the wall) and type that height.
+3. **Horizon** — drag it onto the horizon you can see.
+
+Those three plus the wall height close the system exactly. Above the foundation
+the ruler runs straight up the wall; below it, out across the grade.
+
+**From two ground points** — the original method, for open landscape with no
+building to measure against. That is the workflow below.
+
 ## Workflow
 
 1. **Photograph.** Take one with the iPad camera or pick one from the library.
@@ -135,6 +151,33 @@ h = (−ΔY·cot β_B − D) / (cot β_A − cot β_B)
 So `solveFromPitch` is closed form, and the "camera height" and "line-of-sight
 distance" modes root-find on pitch over that same closed form. Every mode keeps
 both reference points on the exact pixels you tapped.
+
+### Calibrating from a building
+
+Both wall marks sit at the same distance and differ only in elevation, so with
+the horizon fixing the pitch the system closes with no searching at all:
+
+```
+tan(beta_foundation) = h / Z
+tan(beta_wall)       = (h - W) / Z
+
+=>  Z = W / (tan beta_foundation - tan beta_wall)
+    h = Z * tan beta_foundation
+```
+
+Scale comes from the wall height and shape from the field of view: double the
+wall height and both the distance and the camera height double with it.
+
+The sight line runs *up* the wall, which is consistent with the sight line
+running *away* from the camera — raising a point's elevation always raises its
+along-sight coordinate, since `dt/dY = f*Z/zc^2 > 0` for any pitch.
+
+What this does not give you is the grade below the foundation. Both marks are on
+the wall, so nothing here observes the ground. Nor can that grade be dragged
+into place: the ground below the foundation lies in the measurement plane, and
+that plane projects to the sight line, so every grade draws the same line in the
+image and only slides where along it each level falls. So the grade is a value
+you set, and the honest thing is to say so rather than derive it from nothing.
 
 ### Why the horizon is the control worth reaching for
 
@@ -239,6 +282,11 @@ first.
   is angled away from the sight line, will drift.
 - Accuracy degrades sharply near the horizon, where a pixel is worth a large
   distance. Readings far past the second reference point are extrapolation.
+- The wall mark must sit directly above the foundation mark on a flat face
+  square to the sight line. A wall that leans, or is seen obliquely, will drift.
+- A shallow grade drops very little across a yard — 2% over 70 ft is 1.4 ft — so
+  whole-foot lines below the foundation land far out or off the frame entirely.
+  Drop the increment to 0.25 ft and they come back.
 - Placing the horizon by eye is only as good as the horizon is visible. A
   treeline or ridge is *above* the true horizon, not on it; over water or a
   level field the line is trustworthy, on rolling ground it is a starting point

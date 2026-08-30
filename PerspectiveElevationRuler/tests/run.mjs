@@ -6,7 +6,14 @@
 // measurements back to the calibrator and check it recovers the camera.
 
 import { PerspectiveProjection } from '../src/core/PerspectiveProjection.js';
-import { calibrate, solveFromPitch, calibrationContext } from '../src/core/PerspectiveCalibration.js';
+import {
+  calibrate,
+  solveFromPitch,
+  calibrationContext,
+  calibrateFromWall,
+  wallContext,
+  solveWallFromPitch,
+} from '../src/core/PerspectiveCalibration.js';
 import { ElevationModel } from '../src/core/ElevationModel.js';
 import { ElevationRuler } from '../src/core/ElevationRuler.js';
 import { MeasurementAnnotation } from '../src/core/MeasurementAnnotation.js';
@@ -508,6 +515,115 @@ group('Foundation measurements agree with the foundation ruler', () => {
     !asGround.valid || Math.abs(asGround.elevation - 106) > 0.5,
     `ground mode gave ${asGround.elevation}`,
   );
+});
+
+group('Wall calibration — foundation, wall height and horizon', () => {
+  const truth = { fovDeg: 65, pitchDeg: 14, cameraHeight: 6 };
+  const wallDistance = 70;
+  const wallHeight = 10;
+  const cam = makeCamera(truth);
+
+  const foundationPoint = cam.projectPlane(0, wallDistance);
+  const wallPoint = cam.projectPlane(wallHeight, wallDistance);
+  const horizonT = cam.focalPx * Math.tan(truth.pitchDeg * DEG);
+
+  ok('up the wall is up the sight line', cam.toLineCoords(wallPoint).t > cam.toLineCoords(foundationPoint).t);
+
+  const base = { ...IMAGE, fovDeg: truth.fovDeg, foundationPoint, wallPoint, wallHeight };
+  const r = calibrateFromWall({ ...base, pitchRad: truth.pitchDeg * DEG });
+
+  ok('calibrates from the wall', r.ok, r.reason);
+  close('recovers pitch', r.solution.pitchRad / DEG, truth.pitchDeg, 1e-9);
+  close('recovers camera height', r.solution.cameraHeight, truth.cameraHeight, 1e-9);
+  close('recovers the wall distance', r.solution.originDistance, wallDistance, 1e-9);
+  close('puts the horizon where it was placed', r.projection.horizonT, horizonT, 1e-6);
+
+  // Both wall marks must land back exactly where they were placed.
+  const a = r.projection.projectPlane(0, r.solution.originDistance);
+  const b = r.projection.projectPlane(wallHeight, r.solution.originDistance);
+  close('foundation reprojects onto its mark (x)', a.x, foundationPoint.x, 1e-6);
+  close('foundation reprojects onto its mark (y)', a.y, foundationPoint.y, 1e-6);
+  close('wall mark reprojects onto itself (x)', b.x, wallPoint.x, 1e-6);
+  close('wall mark reprojects onto itself (y)', b.y, wallPoint.y, 1e-6);
+
+  // Scale comes from the wall height alone; the geometry is otherwise unchanged.
+  const half = calibrateFromWall({ ...base, wallHeight: 5, pitchRad: truth.pitchDeg * DEG });
+  close('halving the wall height halves the distance', half.solution.originDistance, wallDistance / 2, 1e-9);
+  close('halving the wall height halves the camera height', half.solution.cameraHeight, truth.cameraHeight / 2, 1e-9);
+
+  // Moving the horizon is the calibration: it must change the camera, and both
+  // wall marks must stay pinned regardless.
+  const ctx = wallContext(base);
+  let moved = 0;
+  for (const deltaDeg of [-4, -2, 2, 4]) {
+    const sol = solveWallFromPitch((truth.pitchDeg + deltaDeg) * DEG, ctx);
+    if (!sol) continue;
+    moved++;
+    ok(`  horizon ${deltaDeg > 0 ? '+' : ''}${deltaDeg}° changes the camera`,
+       Math.abs(sol.cameraHeight - truth.cameraHeight) > 0.05);
+    const p = calibrateFromWall({ ...base, pitchRad: sol.pitchRad }).projection;
+    const fa = p.projectPlane(0, sol.originDistance);
+    const fb = p.projectPlane(wallHeight, sol.originDistance);
+    ok(`  horizon ${deltaDeg > 0 ? '+' : ''}${deltaDeg}° keeps both wall marks pinned`,
+       Math.hypot(fa.x - foundationPoint.x, fa.y - foundationPoint.y) < 1e-4 &&
+       Math.hypot(fb.x - wallPoint.x, fb.y - wallPoint.y) < 1e-4);
+  }
+  ok('the horizon actually spans a usable range', moved === 4);
+
+  // Raising the horizon means looking further down, so the camera must be higher.
+  const lower = solveWallFromPitch((truth.pitchDeg - 3) * DEG, ctx);
+  const higher = solveWallFromPitch((truth.pitchDeg + 3) * DEG, ctx);
+  ok('a steeper viewing angle implies a higher camera', higher.cameraHeight > lower.cameraHeight);
+
+  // No horizon given: fall back to a plausible eye height rather than failing.
+  const guessed = calibrateFromWall(base);
+  ok('starts from a plausible camera when no horizon is set yet', guessed.ok, guessed.reason);
+  close('  which is about eye height', guessed.solution.cameraHeight, 5.5, 0.01);
+});
+
+group('Wall calibration — guard rails', () => {
+  const cam = makeCamera({ fovDeg: 65, pitchDeg: 14, cameraHeight: 6 });
+  const base = {
+    ...IMAGE,
+    fovDeg: 65,
+    foundationPoint: cam.projectPlane(0, 70),
+    wallPoint: cam.projectPlane(10, 70),
+    wallHeight: 10,
+  };
+  ok('rejects a zero wall height', !calibrateFromWall({ ...base, wallHeight: 0 }).ok);
+  ok('rejects marks that are too close together',
+     !calibrateFromWall({ ...base, wallPoint: { x: base.foundationPoint.x + 2, y: base.foundationPoint.y - 1 } }).ok);
+
+  const ctx = wallContext(base);
+  // A pitch that wraps past the vertical must not produce a mirror-image camera.
+  ok('rejects a pitch beyond the vertical', solveWallFromPitch(ctx.alphaWall + Math.PI / 2 + 0.2, ctx) === null);
+  ok('rejects a pitch below the vertical', solveWallFromPitch(ctx.alphaFoundation - Math.PI / 2 - 0.2, ctx) === null);
+});
+
+group('Stated grade below the foundation', () => {
+  // The wall observes nothing about the ground, so the grade is given outright.
+  const m = new ElevationModel({
+    originElevation: 0,
+    increment: 1,
+    range: 6,
+    slopeOverride: 0.02, // ground falls 2% walking away from the wall
+  });
+  close('slope is what was stated', m.slope, 0.02, 1e-12);
+  close('and needs no direction correction', m.slopeAlongSight, 0.02, 1e-12);
+  ok('reads as a fall away from the wall', m.formatGradeAway() === '2.0% fall away from the wall');
+  ok('a negative grade reads as a rise',
+     new ElevationModel({ slopeOverride: -0.03 }).formatGradeAway() === '3.0% rise away from the wall');
+  ok('a flat grade says so', new ElevationModel({ slopeOverride: 0 }).formatGradeAway() === 'level');
+
+  // The foundation ruler must place its grade half using that stated slope.
+  const cam = makeCamera({ fovDeg: 65, pitchDeg: 14, cameraHeight: 6 });
+  const ruler = new ElevationRuler({ projection: cam, model: m, originDistance: 70 });
+  const { vertical, grade } = ruler.foundationRungs();
+  ok('the wall half stays at the wall', vertical.every((r) => Math.abs(r.Z - 70) < 1e-9));
+  ok('the grade half walks towards the camera',
+     grade.filter((r) => r.Y < 0).every((r) => r.Z < 70));
+  // 2% fall over 50 ft away from the wall is 1 ft down.
+  close('a 1 ft drop sits 50 ft out from the wall', ruler.distanceForOffset(-1), 20, 1e-9);
 });
 
 group('Guard rails', () => {

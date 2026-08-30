@@ -504,6 +504,10 @@ input[type="range"]::-moz-range-thumb {
 .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
 .dot-origin { background: var(--origin); box-shadow: 0 0 0 3px rgba(61, 220, 132, 0.18); }
 .dot-known { background: var(--known); box-shadow: 0 0 0 3px rgba(255, 167, 38, 0.18); }
+.dot-sight { background: var(--sight); box-shadow: 0 0 0 3px rgba(255, 179, 0, 0.18); }
+
+.method { display: grid; gap: 11px; }
+.method[hidden] { display: none; }
 
 .derived {
   display: grid;
@@ -752,7 +756,7 @@ input[type="range"]::-moz-range-thumb {
         <span class="mark" aria-hidden="true"></span>
         <div>
           <strong>Perspective Elevation Ruler</strong>
-          <em>Line-of-sight vertical plane · <span id="app-version">v1.3</span></em>
+          <em>Line-of-sight vertical plane · <span id="app-version">v1.4</span></em>
         </div>
       </div>
       <button class="panel-close" id="panel-close" aria-label="Hide controls">✕</button>
@@ -774,45 +778,118 @@ input[type="range"]::-moz-range-thumb {
       <section class="card" data-step="2">
         <h2><i>2</i> Known Points</h2>
 
-        <div class="ref" id="ref-origin">
-          <div class="ref-head">
-            <span class="dot dot-origin"></span>
-            <span class="ref-name">Origin</span>
-            <button class="btn btn-tiny" id="btn-set-origin">Tap on photo</button>
+        <div class="field">
+          <span>Calibrate from</span>
+          <div class="seg" id="seg-method" role="radiogroup" aria-label="Calibration method">
+            <button type="button" role="radio" data-value="building" aria-checked="true">A building</button>
+            <button type="button" role="radio" data-value="twoPoint" aria-checked="false">Two ground points</button>
           </div>
-          <label class="field">
-            <span>Origin elevation</span>
-            <input type="text" inputmode="decimal" id="in-origin-elev" value="100.00">
-          </label>
         </div>
 
-        <div class="ref" id="ref-known">
-          <div class="ref-head">
-            <span class="dot dot-known"></span>
-            <span class="ref-name">Point B</span>
-            <button class="btn btn-tiny" id="btn-set-known">Tap on photo</button>
-          </div>
-          <label class="field">
-            <span>Point B elevation</span>
-            <input type="text" inputmode="decimal" id="in-known-elev" value="103.00">
-          </label>
-          <label class="field">
-            <span>Horizontal distance</span>
-            <input type="text" inputmode="decimal" id="in-distance" value="40.00">
-          </label>
-          <div class="field">
-            <span>Point B is</span>
-            <div class="seg" id="seg-known-side" role="radiogroup" aria-label="Where Point B sits">
-              <button type="button" role="radio" data-value="farther" aria-checked="true">Farther away</button>
-              <button type="button" role="radio" data-value="nearer" aria-checked="false">Nearer to you</button>
+        <!-- Calibrating against a building: nothing here is a horizontal
+             distance, which is the number that is hard to know in a yard. -->
+        <div id="method-building" class="method">
+          <div class="ref" id="ref-foundation">
+            <div class="ref-head">
+              <span class="dot dot-origin"></span>
+              <span class="ref-name">1 · Foundation</span>
+              <button class="btn btn-tiny" id="btn-set-foundation">Tap on photo</button>
             </div>
-            <small>Photographing a house from its yard puts the foundation at the far end, so Point B is usually the nearer one.</small>
+            <label class="field">
+              <span>Foundation elevation</span>
+              <input type="text" inputmode="decimal" id="in-foundation-elev" value="0.00">
+            </label>
+            <p class="hint">Where the wall meets the ground. This is the zero line.</p>
+          </div>
+
+          <div class="ref" id="ref-wall">
+            <div class="ref-head">
+              <span class="dot dot-known"></span>
+              <span class="ref-name">2 · Wall height</span>
+              <button class="btn btn-tiny" id="btn-set-wall">Tap on photo</button>
+            </div>
+            <label class="field">
+              <span>Height above foundation</span>
+              <input type="text" inputmode="decimal" id="in-wall-height" value="8.00">
+            </label>
+            <p class="hint">
+              A point <strong>straight above</strong> the foundation whose height you
+              know — a course of siding, a door head, the top of the wall.
+            </p>
+          </div>
+
+          <div class="ref" id="ref-horizon">
+            <div class="ref-head">
+              <span class="dot dot-sight"></span>
+              <span class="ref-name">3 · Horizon</span>
+              <button class="btn btn-tiny" id="btn-reset-horizon">Re-centre</button>
+            </div>
+            <p class="hint">
+              <strong>Drag it on the photo</strong> onto the horizon you can see. It sets
+              the viewing angle, and the camera height and distance follow exactly.
+            </p>
+          </div>
+
+          <label class="field field-slider">
+            <span>Grade below foundation <em id="out-grade-away">2.0%</em></span>
+            <input type="range" id="in-grade-away" min="-25" max="25" step="0.1" value="2">
+            <small>
+              Positive falls away from the wall. The wall tells the app nothing about
+              the ground, so this one is yours to set — dial it until the lines below
+              zero sit on features you recognise.
+            </small>
+          </label>
+
+          <div class="derived" id="derived-building">
+            <span>Camera height</span><strong id="out-b-cam">—</strong>
+            <span>Distance to wall</span><strong id="out-b-dist">—</strong>
+            <span>Eye level</span><strong id="out-b-eye">—</strong>
+            <span>Grade</span><strong id="out-b-grade">—</strong>
           </div>
         </div>
 
-        <div class="derived" id="derived-grade">
-          <span>Elevation change</span><strong id="out-delta">+3.00'</strong>
-          <span>Grade</span><strong id="out-grade">7.5%</strong>
+        <!-- Two ground points: the original method, for open landscape with no
+             building to measure against. -->
+        <div id="method-twopoint" class="method" hidden>
+          <div class="ref" id="ref-origin">
+            <div class="ref-head">
+              <span class="dot dot-origin"></span>
+              <span class="ref-name">Origin</span>
+              <button class="btn btn-tiny" id="btn-set-origin">Tap on photo</button>
+            </div>
+            <label class="field">
+              <span>Origin elevation</span>
+              <input type="text" inputmode="decimal" id="in-origin-elev" value="100.00">
+            </label>
+          </div>
+
+          <div class="ref" id="ref-known">
+            <div class="ref-head">
+              <span class="dot dot-known"></span>
+              <span class="ref-name">Point B</span>
+              <button class="btn btn-tiny" id="btn-set-known">Tap on photo</button>
+            </div>
+            <label class="field">
+              <span>Point B elevation</span>
+              <input type="text" inputmode="decimal" id="in-known-elev" value="103.00">
+            </label>
+            <label class="field">
+              <span>Horizontal distance</span>
+              <input type="text" inputmode="decimal" id="in-distance" value="40.00">
+            </label>
+            <div class="field">
+              <span>Point B is</span>
+              <div class="seg" id="seg-known-side" role="radiogroup" aria-label="Where Point B sits">
+                <button type="button" role="radio" data-value="farther" aria-checked="true">Farther away</button>
+                <button type="button" role="radio" data-value="nearer" aria-checked="false">Nearer to you</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="derived" id="derived-grade">
+            <span>Elevation change</span><strong id="out-delta">+3.00'</strong>
+            <span>Grade</span><strong id="out-grade">7.5%</strong>
+          </div>
         </div>
       </section>
 
@@ -835,6 +912,7 @@ input[type="range"]::-moz-range-thumb {
           <small>Camera field of view. Wider = stronger convergence.</small>
         </label>
 
+        <div id="wrap-fine-tune">
         <label class="field">
           <span>Fine-tune by</span>
           <select id="in-solve-mode">
@@ -849,6 +927,7 @@ input[type="range"]::-moz-range-thumb {
           <input type="range" id="in-solve" min="0" max="100" step="0.1" value="50">
           <small id="hint-solve">Both known points stay pinned whatever you choose.</small>
         </label>
+        </div>
 
         <div class="derived" id="derived-cal">
           <span>Camera height</span><strong id="out-cam-h">—</strong>
@@ -1507,13 +1586,22 @@ function solveFromPitch(pitchRad, ctx) {
   };
 }
 
+/**
+ * The open interval of pitches for which a solution can exist: every ray must
+ * be a real depression angle strictly inside (-90, 90) degrees.
+ */
+function pitchDomainForAlphas(a, b) {
+  return {
+    lo: Math.max(a, b) - Math.PI / 2 + EPS,
+    hi: Math.min(a, b) + Math.PI / 2 - EPS,
+  };
+}
+
 /** The open interval of pitches for which a solution can exist. */
 function pitchDomain(ctx) {
-  // beta_A must be a real depression angle strictly inside (-90, 90) degrees,
-  // and the same for beta_B.
-  const lo = Math.max(ctx.alphaNear, ctx.alphaFar) - Math.PI / 2 + EPS;
-  const hi = Math.min(ctx.alphaNear, ctx.alphaFar) + Math.PI / 2 - EPS;
-  return { lo, hi };
+  return ctx.wallHeight != null
+    ? pitchDomainForAlphas(ctx.alphaFoundation, ctx.alphaWall)
+    : pitchDomainForAlphas(ctx.alphaNear, ctx.alphaFar);
 }
 
 /**
@@ -1625,6 +1713,195 @@ function solutionRanges(ctx) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// CALIBRATING AGAINST A BUILDING
+// ---------------------------------------------------------------------------
+//
+// A better set of inputs when there is a building in the shot, because none of
+// them is a horizontal distance — the one number that is genuinely hard to know
+// standing in a yard. Instead:
+//
+//   * the foundation, where the wall meets the ground,
+//   * a point up the wall at a height you DO know (a course of siding, a door
+//     head, a story pole),
+//   * the horizon, which you can usually see.
+//
+// The two wall points sit at the same distance and differ only in elevation, so
+// with the horizon fixing the pitch the system closes exactly:
+//
+//     tan(beta_foundation) = h / Z
+//     tan(beta_wall)       = (h - W) / Z
+//  => Z = W / (tan beta_foundation - tan beta_wall)
+//     h = Z * tan beta_foundation
+//
+// Closed form, no searching, and nothing under-determined: the scale comes from
+// the wall height and the shape from the field of view.
+//
+// The sight line runs UP the wall, which is consistent: raising a point's
+// elevation always raises its along-sight coordinate (dt/dY = f*Z/zc^2 > 0),
+// just as moving it farther away does.
+//
+// What this does NOT give you is the grade below the foundation. Both reference
+// points are on the wall, so nothing here observes the ground; that grade is a
+// separate input rather than something the app can pretend to derive.
+
+/** Everything the wall solver needs that does not depend on the camera. */
+function wallContext({
+  imageWidth,
+  imageHeight,
+  fovDeg,
+  foundationPoint,
+  wallPoint,
+  wallHeight,
+}) {
+  const focalPx = imageWidth / 2 / Math.tan((fovDeg * DEG) / 2);
+  // Up the wall is the direction of increasing elevation, and of increasing
+  // distance too, so this is the same sight-line axis the projection uses.
+  const d = normalize(sub(wallPoint, foundationPoint));
+  const n = perp(d);
+  const centre = { x: imageWidth / 2, y: imageHeight / 2 };
+  const P0 = add(foundationPoint, scale(d, dot(sub(centre, foundationPoint), d)));
+  const tFoundation = dot(sub(foundationPoint, P0), d);
+  const tWall = dot(sub(wallPoint, P0), d);
+
+  return {
+    imageWidth,
+    imageHeight,
+    fovDeg,
+    focalPx,
+    d,
+    n,
+    P0,
+    tFoundation,
+    tWall,
+    alphaFoundation: Math.atan2(tFoundation, focalPx),
+    alphaWall: Math.atan2(tWall, focalPx),
+    wallHeight,
+    foundationPoint: { ...foundationPoint },
+    wallPoint: { ...wallPoint },
+  };
+}
+
+/**
+ * Closed-form camera for a given pitch, which the horizon sets directly.
+ * @returns {{pitchRad,cameraHeight,originDistance,knownDistance}|null}
+ */
+function solveWallFromPitch(pitchRad, ctx) {
+  const betaFoundation = pitchRad - ctx.alphaFoundation;
+  const betaWall = pitchRad - ctx.alphaWall;
+  const limit = Math.PI / 2 - EPS;
+  // Both rays must point forwards. Without this a pitch that wraps past the
+  // vertical produces a tangent with the right sign and a mirror-image camera.
+  if (Math.abs(betaFoundation) > limit || Math.abs(betaWall) > limit) return null;
+
+  const tanFoundation = Math.tan(betaFoundation);
+  const tanWall = Math.tan(betaWall);
+  const den = tanFoundation - tanWall;
+  if (!Number.isFinite(den) || !(den > 1e-9)) return null;
+
+  const Z = ctx.wallHeight / den;
+  const cameraHeight = Z * tanFoundation;
+  if (!(Z > 1e-6) || !Number.isFinite(cameraHeight)) return null;
+
+  // The camera may sit below the foundation (looking up at a house on a rise),
+  // so a negative height is legitimate and deliberately not rejected.
+  return { pitchRad, cameraHeight, originDistance: Z, knownDistance: Z };
+}
+
+/** A starting pitch that puts the camera at about eye height, to be dragged from. */
+function initialWallSolution(ctx, preferredHeight = 5.5) {
+  const { lo, hi } = pitchDomainForAlphas(ctx.alphaFoundation, ctx.alphaWall);
+  if (!(hi > lo)) return null;
+  const N = 1400;
+  let best = null;
+  let previous = null;
+  for (let i = 0; i <= N; i++) {
+    const theta = lo + ((hi - lo) * i) / N;
+    const sol = solveWallFromPitch(theta, ctx);
+    if (!sol) {
+      previous = null;
+      continue;
+    }
+    if (previous) {
+      const f0 = previous.sol.cameraHeight - preferredHeight;
+      const f1 = sol.cameraHeight - preferredHeight;
+      if (f0 === 0) return previous.sol;
+      if (f0 > 0 !== f1 > 0) {
+        const root = bisect(
+          (th) => {
+            const s = solveWallFromPitch(th, ctx);
+            return s ? s.cameraHeight - preferredHeight : NaN;
+          },
+          previous.theta,
+          theta,
+        );
+        const exact = root == null ? null : solveWallFromPitch(root, ctx);
+        if (exact) return exact;
+      }
+    }
+    const err = Math.abs(sol.cameraHeight - preferredHeight);
+    if (!best || err < best.err) best = { err, sol };
+    previous = { theta, sol };
+  }
+  return best ? best.sol : null;
+}
+
+/**
+ * Calibrate from a building: foundation, a known height up the wall, and the
+ * horizon. `pitchRad` comes straight from where the horizon is placed.
+ */
+function calibrateFromWall(input) {
+  const {
+    imageWidth,
+    imageHeight,
+    fovDeg,
+    foundationPoint,
+    wallPoint,
+    wallHeight,
+    pitchRad = null,
+  } = input;
+
+  if (!(imageWidth > 0) || !(imageHeight > 0)) {
+    return { ok: false, reason: 'No photograph loaded.' };
+  }
+  if (!foundationPoint || !wallPoint) {
+    return { ok: false, reason: 'Mark the foundation and a known height up the wall.' };
+  }
+  if (!(wallHeight > 0)) {
+    return { ok: false, reason: 'Wall height must be greater than zero.' };
+  }
+  const separation = Math.hypot(wallPoint.x - foundationPoint.x, wallPoint.y - foundationPoint.y);
+  if (separation < 8) {
+    return { ok: false, reason: 'The foundation and wall marks are too close together in the photo.' };
+  }
+
+  const ctx = wallContext({ imageWidth, imageHeight, fovDeg, foundationPoint, wallPoint, wallHeight });
+
+  let solution = pitchRad == null ? null : solveWallFromPitch(pitchRad, ctx);
+  if (!solution) solution = initialWallSolution(ctx);
+  if (!solution) {
+    return {
+      ok: false,
+      reason: 'No camera fits that wall. Check the wall height, or try a different field of view.',
+      context: ctx,
+    };
+  }
+
+  const projection = new PerspectiveProjection({
+    imageWidth,
+    imageHeight,
+    fovDeg,
+    pitchRad: solution.pitchRad,
+    cameraHeight: solution.cameraHeight,
+    // The sight line runs up the wall: increasing elevation and increasing
+    // distance are the same direction along it.
+    losA: foundationPoint,
+    losB: wallPoint,
+  });
+
+  return { ok: true, projection, solution, context: ctx };
+}
+
 /**
  * The user-facing entry point.
  *
@@ -1725,6 +2002,7 @@ class ElevationModel {
     unitSuffix = "'",
     decimals = 2,
     knownIsFarther = true,
+    slopeOverride = null,
   } = {}) {
     this.originElevation = originElevation;
     this.knownElevation = knownElevation;
@@ -1734,6 +2012,10 @@ class ElevationModel {
     this.unitSuffix = unitSuffix;
     this.decimals = decimals;
     this.knownIsFarther = knownIsFarther;
+    // Set when the grade is stated outright rather than derived from two known
+    // points — calibrating against a building observes the wall, not the ground,
+    // so nothing there can imply a grade and it has to be given.
+    this.slopeOverride = slopeOverride;
   }
 
   /** Elevation difference between the two measured points. */
@@ -1747,6 +2029,7 @@ class ElevationModel {
    * entered and the one shown on screen.
    */
   get slope() {
+    if (this.slopeOverride != null) return this.slopeOverride;
     if (!(this.horizontalDistance > 0)) return 0;
     return this.deltaElevation / this.horizontalDistance;
   }
@@ -1759,6 +2042,9 @@ class ElevationModel {
    * uphill where the ground falls.
    */
   get slopeAlongSight() {
+    // A stated grade is already expressed along the sight line, so it needs no
+    // direction correction.
+    if (this.slopeOverride != null) return this.slopeOverride;
     return this.knownIsFarther ? this.slope : -this.slope;
   }
 
@@ -1831,6 +2117,17 @@ class ElevationModel {
     return `${this.formatNumber(distance)}${this.unitSuffix}`;
   }
 
+  /**
+   * The grade as a landscaper states it at a building: what the ground does as
+   * you walk AWAY from the wall. Away from the wall is towards the camera, so a
+   * fall away from the house is a rise along the sight line.
+   */
+  formatGradeAway(slope = this.slopeAlongSight) {
+    const pct = Math.abs(slope) * 100;
+    if (pct < 0.05) return 'level';
+    return `${round(pct, 1).toFixed(1)}% ${slope > 0 ? 'fall' : 'rise'} away from the wall`;
+  }
+
   formatGrade(slope = this.slope) {
     const pct = slope * 100;
     const ratio = Math.abs(slope) > 1e-9 ? ` (1:${round(1 / Math.abs(slope), 1).toFixed(1)})` : '';
@@ -1847,6 +2144,7 @@ class ElevationModel {
       unitSuffix: this.unitSuffix,
       decimals: this.decimals,
       knownIsFarther: this.knownIsFarther,
+      slopeOverride: this.slopeOverride,
     };
   }
 }
@@ -3673,6 +3971,16 @@ class App {
     this.$ = (id) => root.getElementById(id);
 
     this.state = {
+      calibrationMethod: 'building',
+      // Building method: the foundation is the datum, a known height up the
+      // wall gives the scale, and the horizon — stored as the image point the
+      // user put it on, not as an angle — gives the viewing angle. Keeping it
+      // as a point means it stays put on the photograph when the field of view
+      // changes, which is what someone who placed it on a visible line expects.
+      foundationElevation: 0,
+      wallHeight: 8,
+      horizonPoint: null,
+      gradeAwayPercent: 2,
       originElevation: 100,
       knownElevation: 103,
       horizontalDistance: 40,
@@ -3682,7 +3990,7 @@ class App {
       fovDeg: 60,
       solveMode: 'height',
       solveValue: 5.5,
-      rulerStyle: 'slope',
+      rulerStyle: 'foundation', // follows calibrationMethod: 'building'
       knownIsFarther: true,
       rungWidth: 10,
       staffDistance: null,
@@ -3764,6 +4072,35 @@ class App {
     // --- reference points -------------------------------------------------
     $('btn-set-origin').onclick = () => this._arm('origin');
     $('btn-set-known').onclick = () => this._arm('known');
+    $('btn-set-foundation').onclick = () => this._arm('origin');
+    $('btn-set-wall').onclick = () => this._arm('known');
+    $('btn-reset-horizon').onclick = () => {
+      this.state.horizonPoint = null; // fall back to an eye-height guess
+      this._recalculate();
+    };
+
+    this._paintMethod = this._segmented('seg-method', (value) => {
+      this.state.calibrationMethod = value;
+      this._paintMethod(value);
+      // Marks placed for one method mean something different under the other.
+      this.annotations.clear();
+      this.selectionQueue = [];
+      this.state.horizonPoint = null;
+      // The ruler that matches the method: a building is measured up its wall
+      // and out across the grade; open ground is measured along the grade.
+      this._setRulerStyle(value === 'building' ? 'foundation' : 'slope');
+      this._syncMethodFields();
+      this._recalculate();
+      this._arm('origin');
+    });
+
+    this._numberField('in-foundation-elev', 'foundationElevation');
+    this._numberField('in-wall-height', 'wallHeight', (v) => (v > 0 ? v : null));
+    $('in-grade-away').oninput = (e) => {
+      this.state.gradeAwayPercent = Number(e.target.value);
+      $('out-grade-away').textContent = `${this.state.gradeAwayPercent.toFixed(1)}%`;
+      this._recalculate();
+    };
 
     this._numberField('in-origin-elev', 'originElevation');
     this._numberField('in-known-elev', 'knownElevation');
@@ -3807,9 +4144,7 @@ class App {
       this._recalculate();
     };
     this._paintStyle = this._segmented('seg-style', (value) => {
-      this.state.rulerStyle = value;
-      this._paintStyle(value);
-      this._syncStyleFields();
+      this._setRulerStyle(value);
       this._recalculate();
     });
     this._paintKnownSide = this._segmented('seg-known-side', (value) => {
@@ -3913,11 +4248,8 @@ class App {
       }
       this.state[key] = value;
       el.value = this._fmt(value);
-      const ref = key === 'originElevation' ? 'origin' : key === 'knownElevation' ? 'known' : null;
-      if (ref) {
-        const point = this.annotations.referencePoint(ref);
-        if (point) point.elevation = value;
-      }
+      // Reference elevations are re-derived from state in _recalculate, so the
+      // marks stay in step whichever field changed.
       this._recalculate();
     };
     el.onchange = commit;
@@ -4073,14 +4405,26 @@ class App {
     const tol = this.view.photoTolerance(30);
 
     if (this.state.tool === 'origin') {
-      this.annotations.setReferencePoint('origin', p, this.state.originElevation, this._defaultLabelOffset());
+      this.annotations.setReferencePoint(
+        'origin',
+        p,
+        this._isBuilding ? this.state.foundationElevation : this.state.originElevation,
+        this._defaultLabelOffset(),
+      );
       this._arm(this.annotations.known ? 'select' : 'known');
       this._recalculate();
       this.drag = { id: this.annotations.origin.id, reference: true };
       return true;
     }
     if (this.state.tool === 'known') {
-      this.annotations.setReferencePoint('known', p, this.state.knownElevation, this._defaultLabelOffset());
+      this.annotations.setReferencePoint(
+        'known',
+        p,
+        this._isBuilding
+          ? this.state.foundationElevation + this.state.wallHeight
+          : this.state.knownElevation,
+        this._defaultLabelOffset(),
+      );
       this._arm('select');
       this.state.step = 4;
       this._recalculate();
@@ -4151,9 +4495,11 @@ class App {
     // whole frame, so it must never win over something specific the user aimed at.
     if (this._horizonUnder(p, tol)) {
       this.drag = { horizon: true };
-      // Dragging the horizon IS the pitch solve, so make the panel say so.
-      this.state.solveMode = 'pitch';
-      this.$('in-solve-mode').value = 'pitch';
+      if (!this._isBuilding) {
+        // Dragging the horizon IS the pitch solve, so make the panel say so.
+        this.state.solveMode = 'pitch';
+        this.$('in-solve-mode').value = 'pitch';
+      }
       this.view.render();
       return true;
     }
@@ -4191,6 +4537,14 @@ class App {
       x: clamp(pointer.x, 0, this.view.imageWidth),
       y: clamp(pointer.y, 0, this.view.imageHeight),
     };
+    if (this._isBuilding) {
+      // The horizon is an observed feature of the photograph, so it is stored
+      // as the point it was placed on; the pitch is re-derived from it.
+      this.state.horizonPoint = p;
+      this._recalculate({ quiet: true });
+      return;
+    }
+
     const { t } = this.projection.toLineCoords(p);
     const pitchRad = Math.atan2(t, this.projection.focalPx);
     const domain = this._solveDomain();
@@ -4247,19 +4601,43 @@ class App {
   // Calibration
   // ======================================================================
 
+  _setRulerStyle(value) {
+    this.state.rulerStyle = value;
+    this._paintStyle(value);
+    this._syncStyleFields();
+  }
+
+  get _isBuilding() {
+    return this.state.calibrationMethod === 'building';
+  }
+
   /** How a tapped point should be turned into an elevation, given the ruler. */
   get _measurementMode() {
     return this.state.rulerStyle === 'foundation' ? 'foundation' : 'ground';
   }
 
   _buildModel() {
-    return new ElevationModel({
-      originElevation: this.state.originElevation,
-      knownElevation: this.state.knownElevation,
-      horizontalDistance: this.state.horizontalDistance,
+    const common = {
       increment: this.state.increment,
       range: this.state.range,
       unitSuffix: this.state.unit === 'm' ? 'm' : "'",
+    };
+    if (this._isBuilding) {
+      return new ElevationModel({
+        ...common,
+        originElevation: this.state.foundationElevation,
+        knownElevation: this.state.foundationElevation + this.state.wallHeight,
+        // The wall observes nothing about the ground, so the grade is stated
+        // rather than derived. Positive falls away from the wall, which is a
+        // rise along the sight line since away from the wall is towards you.
+        slopeOverride: this.state.gradeAwayPercent / 100,
+      });
+    }
+    return new ElevationModel({
+      ...common,
+      originElevation: this.state.originElevation,
+      knownElevation: this.state.knownElevation,
+      horizontalDistance: this.state.horizontalDistance,
       knownIsFarther: this.state.knownIsFarther,
     });
   }
@@ -4278,7 +4656,51 @@ class App {
     this.ruler = null;
     this.calibrationError = null;
 
-    if (this.image && origin && known) {
+    if (this.image && origin && known && this._isBuilding) {
+      // Where the user put the horizon, as a point on the photograph. Turning
+      // it into a pitch needs the sight line, which the wall marks define.
+      const ctx = wallContext({
+        imageWidth: this.view.imageWidth,
+        imageHeight: this.view.imageHeight,
+        fovDeg: this.state.fovDeg,
+        foundationPoint: origin.imagePoint,
+        wallPoint: known.imagePoint,
+        wallHeight: this.state.wallHeight,
+      });
+      let pitchRad = null;
+      if (this.state.horizonPoint) {
+        const t = dot(sub(this.state.horizonPoint, ctx.P0), ctx.d);
+        pitchRad = Math.atan2(t, ctx.focalPx);
+      }
+
+      const result = calibrateFromWall({
+        imageWidth: this.view.imageWidth,
+        imageHeight: this.view.imageHeight,
+        fovDeg: this.state.fovDeg,
+        foundationPoint: origin.imagePoint,
+        wallPoint: known.imagePoint,
+        wallHeight: this.state.wallHeight,
+        pitchRad,
+      });
+
+      if (result.ok) {
+        this.projection = result.projection;
+        this.solution = result.solution;
+        this.context = result.context;
+        this.ruler = new ElevationRuler({
+          projection: this.projection,
+          model: this.model,
+          originDistance: this.solution.originDistance,
+          rungWidth: this.state.rungWidth,
+        });
+        // Pin the horizon to wherever the solve actually put it, so the stored
+        // point and the drawn line can never drift apart.
+        this.state.horizonPoint = this.projection.fromLineCoords(this.projection.horizonT);
+        if (this.state.step < 5) this.state.step = 5;
+      } else {
+        this.calibrationError = result.reason;
+      }
+    } else if (this.image && origin && known) {
       const result = calibrate({
         imageWidth: this.view.imageWidth,
         imageHeight: this.view.imageHeight,
@@ -4312,7 +4734,16 @@ class App {
     this._relayoutLabels();
     for (const point of this.annotations.measurements) point.mode = this._measurementMode;
     // The origin is the foundation in that workflow; name it so on the drawing.
-    if (origin) origin.label = this.state.rulerStyle === 'foundation' ? 'FOUNDATION' : 'ORIGIN';
+    if (origin) {
+      origin.elevation = this._isBuilding ? this.state.foundationElevation : this.state.originElevation;
+      origin.label = this._isBuilding || this.state.rulerStyle === 'foundation' ? 'FOUNDATION' : 'ORIGIN';
+    }
+    if (known) {
+      known.elevation = this._isBuilding
+        ? this.state.foundationElevation + this.state.wallHeight
+        : this.state.knownElevation;
+      known.label = this._isBuilding ? 'WALL' : 'POINT B';
+    }
     this.annotations.solveAll(this.projection, this.model, this.solution?.originDistance ?? 0);
     if (!quiet) this._syncSolveSlider();
     this._syncDerived();
@@ -4503,6 +4934,10 @@ class App {
     $('out-range').textContent = `±${s.range}${this._suffix}`;
     this._paintStyle(s.rulerStyle);
     this._paintKnownSide(s.knownIsFarther ? 'farther' : 'nearer');
+    this._paintMethod(s.calibrationMethod);
+    $('in-foundation-elev').value = this._fmt(s.foundationElevation);
+    $('in-wall-height').value = this._fmt(s.wallHeight);
+    this._syncMethodFields();
     $('in-rung-width').value = String(s.rungWidth);
     $('out-rung-width').textContent = `${s.rungWidth}${this._suffix}`;
     $('in-label-mode').value = s.labelMode;
@@ -4550,19 +4985,45 @@ class App {
     }
   }
 
+  /** Show only the fields that belong to the chosen calibration method. */
+  _syncMethodFields() {
+    const building = this._isBuilding;
+    this.$('method-building').hidden = !building;
+    this.$('method-twopoint').hidden = building;
+    // In building mode the pitch comes from the horizon, so the fine-tune
+    // selector has nothing left to choose between.
+    this.$('wrap-fine-tune').hidden = building;
+    this.$('in-grade-away').value = String(this.state.gradeAwayPercent);
+    this.$('out-grade-away').textContent = `${this.state.gradeAwayPercent.toFixed(1)}%`;
+  }
+
   _syncDerived() {
     const m = this.model;
+    const building = this._isBuilding;
     this.$('out-delta').textContent = m.formatChange(m.deltaElevation);
     this.$('out-grade').textContent = m.isFlat ? 'Level' : m.formatGrade();
-
-    this.$('ref-origin').classList.toggle('is-set', !!this.annotations.origin);
-    this.$('ref-known').classList.toggle('is-set', !!this.annotations.known);
-    this.$('btn-set-origin').textContent = this.annotations.origin ? 'Move' : 'Tap on photo';
-    this.$('btn-set-known').textContent = this.annotations.known ? 'Move' : 'Tap on photo';
 
     const set = (id, text) => {
       this.$(id).textContent = text;
     };
+    if (building) {
+      const s = this.solution;
+      set('out-b-cam', s ? `${m.formatNumber(s.cameraHeight)}${this._suffix}` : '—');
+      set('out-b-dist', s ? `${m.formatNumber(s.originDistance)}${this._suffix}` : '—');
+      set('out-b-eye', s ? m.formatElevation(m.originElevation + s.cameraHeight) : '—');
+      set('out-b-grade', m.formatGradeAway());
+    }
+
+    for (const [block, role] of [['ref-origin', 'origin'], ['ref-known', 'known'],
+                                 ['ref-foundation', 'origin'], ['ref-wall', 'known']]) {
+      this.$(block).classList.toggle('is-set', !!this.annotations.referencePoint(role));
+    }
+    this.$('ref-horizon').classList.toggle('is-set', !!this.state.horizonPoint);
+    for (const [button, role] of [['btn-set-origin', 'origin'], ['btn-set-known', 'known'],
+                                  ['btn-set-foundation', 'origin'], ['btn-set-wall', 'known']]) {
+      this.$(button).textContent = this.annotations.referencePoint(role) ? 'Move' : 'Tap on photo';
+    }
+
     if (this.solution) {
       set('out-cam-h', `${m.formatNumber(this.solution.cameraHeight)}${this._suffix}`);
       set('out-pitch', `${(this.solution.pitchRad * RAD).toFixed(1)}° down`);
@@ -4577,7 +5038,7 @@ class App {
     if (this.calibrationError) {
       warn.textContent = this.calibrationError;
       warn.hidden = false;
-    } else if (this.model.isFlat && this.annotations.known) {
+    } else if (!building && this.model.isFlat && this.annotations.known) {
       warn.textContent =
         'Both known points are at the same elevation, so the grade is level. The ruler is shown as a levelling staff instead of a staircase.';
       warn.hidden = false;
@@ -4724,6 +5185,10 @@ class App {
     this.annotations.clear();
     this.selectionQueue = [];
     Object.assign(this.state, {
+      foundationElevation: 0,
+      wallHeight: 8,
+      horizonPoint: null,
+      gradeAwayPercent: 2,
       originElevation: 100,
       knownElevation: 103,
       horizontalDistance: 40,
@@ -4732,7 +5197,7 @@ class App {
       fovDeg: 60,
       solveMode: 'height',
       solveValue: 5.5,
-      rulerStyle: 'slope',
+      rulerStyle: this._isBuilding ? 'foundation' : 'slope',
       knownIsFarther: true,
       rungWidth: 10,
       staffDistance: null,
@@ -4860,7 +5325,12 @@ class App {
     }
     if (!payload) return;
 
-    Object.assign(this.state, payload.state ?? {}, { tool: 'select' });
+    // A session saved before the building method existed holds origin/Point B
+    // marks. Left to default to 'building' they would be silently reinterpreted
+    // as a foundation and a wall, quietly changing what the numbers mean.
+    const restored = payload.state ?? {};
+    if (restored.calibrationMethod == null) restored.calibrationMethod = 'twoPoint';
+    Object.assign(this.state, restored, { tool: 'select' });
     this.model = this._buildModel();
 
     if (payload.image) {

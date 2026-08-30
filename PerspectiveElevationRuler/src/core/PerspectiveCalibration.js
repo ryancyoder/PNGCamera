@@ -148,13 +148,22 @@ export function solveFromPitch(pitchRad, ctx) {
   };
 }
 
+/**
+ * The open interval of pitches for which a solution can exist: every ray must
+ * be a real depression angle strictly inside (-90, 90) degrees.
+ */
+export function pitchDomainForAlphas(a, b) {
+  return {
+    lo: Math.max(a, b) - Math.PI / 2 + EPS,
+    hi: Math.min(a, b) + Math.PI / 2 - EPS,
+  };
+}
+
 /** The open interval of pitches for which a solution can exist. */
 export function pitchDomain(ctx) {
-  // beta_A must be a real depression angle strictly inside (-90, 90) degrees,
-  // and the same for beta_B.
-  const lo = Math.max(ctx.alphaNear, ctx.alphaFar) - Math.PI / 2 + EPS;
-  const hi = Math.min(ctx.alphaNear, ctx.alphaFar) + Math.PI / 2 - EPS;
-  return { lo, hi };
+  return ctx.wallHeight != null
+    ? pitchDomainForAlphas(ctx.alphaFoundation, ctx.alphaWall)
+    : pitchDomainForAlphas(ctx.alphaNear, ctx.alphaFar);
 }
 
 /**
@@ -264,6 +273,195 @@ export function solutionRanges(ctx) {
     height: { min: Math.min(...heights), max: Math.max(...heights) },
     distance: { min: Math.min(...distances), max: Math.max(...distances) },
   };
+}
+
+// ---------------------------------------------------------------------------
+// CALIBRATING AGAINST A BUILDING
+// ---------------------------------------------------------------------------
+//
+// A better set of inputs when there is a building in the shot, because none of
+// them is a horizontal distance — the one number that is genuinely hard to know
+// standing in a yard. Instead:
+//
+//   * the foundation, where the wall meets the ground,
+//   * a point up the wall at a height you DO know (a course of siding, a door
+//     head, a story pole),
+//   * the horizon, which you can usually see.
+//
+// The two wall points sit at the same distance and differ only in elevation, so
+// with the horizon fixing the pitch the system closes exactly:
+//
+//     tan(beta_foundation) = h / Z
+//     tan(beta_wall)       = (h - W) / Z
+//  => Z = W / (tan beta_foundation - tan beta_wall)
+//     h = Z * tan beta_foundation
+//
+// Closed form, no searching, and nothing under-determined: the scale comes from
+// the wall height and the shape from the field of view.
+//
+// The sight line runs UP the wall, which is consistent: raising a point's
+// elevation always raises its along-sight coordinate (dt/dY = f*Z/zc^2 > 0),
+// just as moving it farther away does.
+//
+// What this does NOT give you is the grade below the foundation. Both reference
+// points are on the wall, so nothing here observes the ground; that grade is a
+// separate input rather than something the app can pretend to derive.
+
+/** Everything the wall solver needs that does not depend on the camera. */
+export function wallContext({
+  imageWidth,
+  imageHeight,
+  fovDeg,
+  foundationPoint,
+  wallPoint,
+  wallHeight,
+}) {
+  const focalPx = imageWidth / 2 / Math.tan((fovDeg * DEG) / 2);
+  // Up the wall is the direction of increasing elevation, and of increasing
+  // distance too, so this is the same sight-line axis the projection uses.
+  const d = normalize(sub(wallPoint, foundationPoint));
+  const n = perp(d);
+  const centre = { x: imageWidth / 2, y: imageHeight / 2 };
+  const P0 = add(foundationPoint, scale(d, dot(sub(centre, foundationPoint), d)));
+  const tFoundation = dot(sub(foundationPoint, P0), d);
+  const tWall = dot(sub(wallPoint, P0), d);
+
+  return {
+    imageWidth,
+    imageHeight,
+    fovDeg,
+    focalPx,
+    d,
+    n,
+    P0,
+    tFoundation,
+    tWall,
+    alphaFoundation: Math.atan2(tFoundation, focalPx),
+    alphaWall: Math.atan2(tWall, focalPx),
+    wallHeight,
+    foundationPoint: { ...foundationPoint },
+    wallPoint: { ...wallPoint },
+  };
+}
+
+/**
+ * Closed-form camera for a given pitch, which the horizon sets directly.
+ * @returns {{pitchRad,cameraHeight,originDistance,knownDistance}|null}
+ */
+export function solveWallFromPitch(pitchRad, ctx) {
+  const betaFoundation = pitchRad - ctx.alphaFoundation;
+  const betaWall = pitchRad - ctx.alphaWall;
+  const limit = Math.PI / 2 - EPS;
+  // Both rays must point forwards. Without this a pitch that wraps past the
+  // vertical produces a tangent with the right sign and a mirror-image camera.
+  if (Math.abs(betaFoundation) > limit || Math.abs(betaWall) > limit) return null;
+
+  const tanFoundation = Math.tan(betaFoundation);
+  const tanWall = Math.tan(betaWall);
+  const den = tanFoundation - tanWall;
+  if (!Number.isFinite(den) || !(den > 1e-9)) return null;
+
+  const Z = ctx.wallHeight / den;
+  const cameraHeight = Z * tanFoundation;
+  if (!(Z > 1e-6) || !Number.isFinite(cameraHeight)) return null;
+
+  // The camera may sit below the foundation (looking up at a house on a rise),
+  // so a negative height is legitimate and deliberately not rejected.
+  return { pitchRad, cameraHeight, originDistance: Z, knownDistance: Z };
+}
+
+/** A starting pitch that puts the camera at about eye height, to be dragged from. */
+export function initialWallSolution(ctx, preferredHeight = 5.5) {
+  const { lo, hi } = pitchDomainForAlphas(ctx.alphaFoundation, ctx.alphaWall);
+  if (!(hi > lo)) return null;
+  const N = 1400;
+  let best = null;
+  let previous = null;
+  for (let i = 0; i <= N; i++) {
+    const theta = lo + ((hi - lo) * i) / N;
+    const sol = solveWallFromPitch(theta, ctx);
+    if (!sol) {
+      previous = null;
+      continue;
+    }
+    if (previous) {
+      const f0 = previous.sol.cameraHeight - preferredHeight;
+      const f1 = sol.cameraHeight - preferredHeight;
+      if (f0 === 0) return previous.sol;
+      if (f0 > 0 !== f1 > 0) {
+        const root = bisect(
+          (th) => {
+            const s = solveWallFromPitch(th, ctx);
+            return s ? s.cameraHeight - preferredHeight : NaN;
+          },
+          previous.theta,
+          theta,
+        );
+        const exact = root == null ? null : solveWallFromPitch(root, ctx);
+        if (exact) return exact;
+      }
+    }
+    const err = Math.abs(sol.cameraHeight - preferredHeight);
+    if (!best || err < best.err) best = { err, sol };
+    previous = { theta, sol };
+  }
+  return best ? best.sol : null;
+}
+
+/**
+ * Calibrate from a building: foundation, a known height up the wall, and the
+ * horizon. `pitchRad` comes straight from where the horizon is placed.
+ */
+export function calibrateFromWall(input) {
+  const {
+    imageWidth,
+    imageHeight,
+    fovDeg,
+    foundationPoint,
+    wallPoint,
+    wallHeight,
+    pitchRad = null,
+  } = input;
+
+  if (!(imageWidth > 0) || !(imageHeight > 0)) {
+    return { ok: false, reason: 'No photograph loaded.' };
+  }
+  if (!foundationPoint || !wallPoint) {
+    return { ok: false, reason: 'Mark the foundation and a known height up the wall.' };
+  }
+  if (!(wallHeight > 0)) {
+    return { ok: false, reason: 'Wall height must be greater than zero.' };
+  }
+  const separation = Math.hypot(wallPoint.x - foundationPoint.x, wallPoint.y - foundationPoint.y);
+  if (separation < 8) {
+    return { ok: false, reason: 'The foundation and wall marks are too close together in the photo.' };
+  }
+
+  const ctx = wallContext({ imageWidth, imageHeight, fovDeg, foundationPoint, wallPoint, wallHeight });
+
+  let solution = pitchRad == null ? null : solveWallFromPitch(pitchRad, ctx);
+  if (!solution) solution = initialWallSolution(ctx);
+  if (!solution) {
+    return {
+      ok: false,
+      reason: 'No camera fits that wall. Check the wall height, or try a different field of view.',
+      context: ctx,
+    };
+  }
+
+  const projection = new PerspectiveProjection({
+    imageWidth,
+    imageHeight,
+    fovDeg,
+    pitchRad: solution.pitchRad,
+    cameraHeight: solution.cameraHeight,
+    // The sight line runs up the wall: increasing elevation and increasing
+    // distance are the same direction along it.
+    losA: foundationPoint,
+    losB: wallPoint,
+  });
+
+  return { ok: true, projection, solution, context: ctx };
 }
 
 /**

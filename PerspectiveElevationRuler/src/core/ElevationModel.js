@@ -18,6 +18,7 @@ export class ElevationModel {
     unitSuffix = "'",
     decimals = 2,
     knownIsFarther = true,
+    slopeOverride = null,
   } = {}) {
     this.originElevation = originElevation;
     this.knownElevation = knownElevation;
@@ -27,6 +28,10 @@ export class ElevationModel {
     this.unitSuffix = unitSuffix;
     this.decimals = decimals;
     this.knownIsFarther = knownIsFarther;
+    // Set when the grade is stated outright rather than derived from two known
+    // points — calibrating against a building observes the wall, not the ground,
+    // so nothing there can imply a grade and it has to be given.
+    this.slopeOverride = slopeOverride;
   }
 
   /** Elevation difference between the two measured points. */
@@ -40,6 +45,7 @@ export class ElevationModel {
    * entered and the one shown on screen.
    */
   get slope() {
+    if (this.slopeOverride != null) return this.slopeOverride;
     if (!(this.horizontalDistance > 0)) return 0;
     return this.deltaElevation / this.horizontalDistance;
   }
@@ -52,6 +58,9 @@ export class ElevationModel {
    * uphill where the ground falls.
    */
   get slopeAlongSight() {
+    // A stated grade is already expressed along the sight line, so it needs no
+    // direction correction.
+    if (this.slopeOverride != null) return this.slopeOverride;
     return this.knownIsFarther ? this.slope : -this.slope;
   }
 
@@ -124,6 +133,17 @@ export class ElevationModel {
     return `${this.formatNumber(distance)}${this.unitSuffix}`;
   }
 
+  /**
+   * The grade as a landscaper states it at a building: what the ground does as
+   * you walk AWAY from the wall. Away from the wall is towards the camera, so a
+   * fall away from the house is a rise along the sight line.
+   */
+  formatGradeAway(slope = this.slopeAlongSight) {
+    const pct = Math.abs(slope) * 100;
+    if (pct < 0.05) return 'level';
+    return `${round(pct, 1).toFixed(1)}% ${slope > 0 ? 'fall' : 'rise'} away from the wall`;
+  }
+
   formatGrade(slope = this.slope) {
     const pct = slope * 100;
     const ratio = Math.abs(slope) > 1e-9 ? ` (1:${round(1 / Math.abs(slope), 1).toFixed(1)})` : '';
@@ -140,6 +160,7 @@ export class ElevationModel {
       unitSuffix: this.unitSuffix,
       decimals: this.decimals,
       knownIsFarther: this.knownIsFarther,
+      slopeOverride: this.slopeOverride,
     };
   }
 }

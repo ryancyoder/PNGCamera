@@ -86,7 +86,7 @@
         <span class="mark" aria-hidden="true"></span>
         <div>
           <strong>Perspective Elevation Ruler</strong>
-          <em>Line-of-sight vertical plane · <span id="app-version">v1.3</span></em>
+          <em>Line-of-sight vertical plane · <span id="app-version">v1.4</span></em>
         </div>
       </div>
       <button class="panel-close" id="panel-close" aria-label="Hide controls">✕</button>
@@ -108,45 +108,118 @@
       <section class="card" data-step="2">
         <h2><i>2</i> Known Points</h2>
 
-        <div class="ref" id="ref-origin">
-          <div class="ref-head">
-            <span class="dot dot-origin"></span>
-            <span class="ref-name">Origin</span>
-            <button class="btn btn-tiny" id="btn-set-origin">Tap on photo</button>
+        <div class="field">
+          <span>Calibrate from</span>
+          <div class="seg" id="seg-method" role="radiogroup" aria-label="Calibration method">
+            <button type="button" role="radio" data-value="building" aria-checked="true">A building</button>
+            <button type="button" role="radio" data-value="twoPoint" aria-checked="false">Two ground points</button>
           </div>
-          <label class="field">
-            <span>Origin elevation</span>
-            <input type="text" inputmode="decimal" id="in-origin-elev" value="100.00">
-          </label>
         </div>
 
-        <div class="ref" id="ref-known">
-          <div class="ref-head">
-            <span class="dot dot-known"></span>
-            <span class="ref-name">Point B</span>
-            <button class="btn btn-tiny" id="btn-set-known">Tap on photo</button>
-          </div>
-          <label class="field">
-            <span>Point B elevation</span>
-            <input type="text" inputmode="decimal" id="in-known-elev" value="103.00">
-          </label>
-          <label class="field">
-            <span>Horizontal distance</span>
-            <input type="text" inputmode="decimal" id="in-distance" value="40.00">
-          </label>
-          <div class="field">
-            <span>Point B is</span>
-            <div class="seg" id="seg-known-side" role="radiogroup" aria-label="Where Point B sits">
-              <button type="button" role="radio" data-value="farther" aria-checked="true">Farther away</button>
-              <button type="button" role="radio" data-value="nearer" aria-checked="false">Nearer to you</button>
+        <!-- Calibrating against a building: nothing here is a horizontal
+             distance, which is the number that is hard to know in a yard. -->
+        <div id="method-building" class="method">
+          <div class="ref" id="ref-foundation">
+            <div class="ref-head">
+              <span class="dot dot-origin"></span>
+              <span class="ref-name">1 · Foundation</span>
+              <button class="btn btn-tiny" id="btn-set-foundation">Tap on photo</button>
             </div>
-            <small>Photographing a house from its yard puts the foundation at the far end, so Point B is usually the nearer one.</small>
+            <label class="field">
+              <span>Foundation elevation</span>
+              <input type="text" inputmode="decimal" id="in-foundation-elev" value="0.00">
+            </label>
+            <p class="hint">Where the wall meets the ground. This is the zero line.</p>
+          </div>
+
+          <div class="ref" id="ref-wall">
+            <div class="ref-head">
+              <span class="dot dot-known"></span>
+              <span class="ref-name">2 · Wall height</span>
+              <button class="btn btn-tiny" id="btn-set-wall">Tap on photo</button>
+            </div>
+            <label class="field">
+              <span>Height above foundation</span>
+              <input type="text" inputmode="decimal" id="in-wall-height" value="8.00">
+            </label>
+            <p class="hint">
+              A point <strong>straight above</strong> the foundation whose height you
+              know — a course of siding, a door head, the top of the wall.
+            </p>
+          </div>
+
+          <div class="ref" id="ref-horizon">
+            <div class="ref-head">
+              <span class="dot dot-sight"></span>
+              <span class="ref-name">3 · Horizon</span>
+              <button class="btn btn-tiny" id="btn-reset-horizon">Re-centre</button>
+            </div>
+            <p class="hint">
+              <strong>Drag it on the photo</strong> onto the horizon you can see. It sets
+              the viewing angle, and the camera height and distance follow exactly.
+            </p>
+          </div>
+
+          <label class="field field-slider">
+            <span>Grade below foundation <em id="out-grade-away">2.0%</em></span>
+            <input type="range" id="in-grade-away" min="-25" max="25" step="0.1" value="2">
+            <small>
+              Positive falls away from the wall. The wall tells the app nothing about
+              the ground, so this one is yours to set — dial it until the lines below
+              zero sit on features you recognise.
+            </small>
+          </label>
+
+          <div class="derived" id="derived-building">
+            <span>Camera height</span><strong id="out-b-cam">—</strong>
+            <span>Distance to wall</span><strong id="out-b-dist">—</strong>
+            <span>Eye level</span><strong id="out-b-eye">—</strong>
+            <span>Grade</span><strong id="out-b-grade">—</strong>
           </div>
         </div>
 
-        <div class="derived" id="derived-grade">
-          <span>Elevation change</span><strong id="out-delta">+3.00'</strong>
-          <span>Grade</span><strong id="out-grade">7.5%</strong>
+        <!-- Two ground points: the original method, for open landscape with no
+             building to measure against. -->
+        <div id="method-twopoint" class="method" hidden>
+          <div class="ref" id="ref-origin">
+            <div class="ref-head">
+              <span class="dot dot-origin"></span>
+              <span class="ref-name">Origin</span>
+              <button class="btn btn-tiny" id="btn-set-origin">Tap on photo</button>
+            </div>
+            <label class="field">
+              <span>Origin elevation</span>
+              <input type="text" inputmode="decimal" id="in-origin-elev" value="100.00">
+            </label>
+          </div>
+
+          <div class="ref" id="ref-known">
+            <div class="ref-head">
+              <span class="dot dot-known"></span>
+              <span class="ref-name">Point B</span>
+              <button class="btn btn-tiny" id="btn-set-known">Tap on photo</button>
+            </div>
+            <label class="field">
+              <span>Point B elevation</span>
+              <input type="text" inputmode="decimal" id="in-known-elev" value="103.00">
+            </label>
+            <label class="field">
+              <span>Horizontal distance</span>
+              <input type="text" inputmode="decimal" id="in-distance" value="40.00">
+            </label>
+            <div class="field">
+              <span>Point B is</span>
+              <div class="seg" id="seg-known-side" role="radiogroup" aria-label="Where Point B sits">
+                <button type="button" role="radio" data-value="farther" aria-checked="true">Farther away</button>
+                <button type="button" role="radio" data-value="nearer" aria-checked="false">Nearer to you</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="derived" id="derived-grade">
+            <span>Elevation change</span><strong id="out-delta">+3.00'</strong>
+            <span>Grade</span><strong id="out-grade">7.5%</strong>
+          </div>
         </div>
       </section>
 
@@ -169,6 +242,7 @@
           <small>Camera field of view. Wider = stronger convergence.</small>
         </label>
 
+        <div id="wrap-fine-tune">
         <label class="field">
           <span>Fine-tune by</span>
           <select id="in-solve-mode">
@@ -183,6 +257,7 @@
           <input type="range" id="in-solve" min="0" max="100" step="0.1" value="50">
           <small id="hint-solve">Both known points stay pinned whatever you choose.</small>
         </label>
+        </div>
 
         <div class="derived" id="derived-cal">
           <span>Camera height</span><strong id="out-cam-h">—</strong>
