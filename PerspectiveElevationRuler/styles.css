@@ -582,6 +582,100 @@ input[type="range"]::-moz-range-thumb {
 .row { display: grid; gap: 8px; }
 .row-2 { grid-template-columns: 1fr 1fr; }
 
+/* -------------------------------------------------------------- survey */
+
+.survey {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  display: flex;
+  background: var(--bg);
+}
+.survey[hidden] { display: none; }
+
+.survey-plan { position: relative; flex: 1 1 auto; min-width: 0; }
+#plan-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+
+.survey-hud {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  left: 12px;
+  right: 12px;
+  max-width: 620px;
+  background: rgba(9, 14, 20, 0.86);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font-size: 13px;
+  pointer-events: none;
+}
+.survey-hud strong { color: var(--accent); }
+.survey-zoom { bottom: max(12px, env(safe-area-inset-bottom)); }
+
+.survey-panel {
+  flex: 0 0 var(--panel-w);
+  width: var(--panel-w);
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.tilt-readout {
+  display: grid;
+  place-items: center;
+  min-height: var(--tap);
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #0a1017;
+  font: 700 18px/1 ui-monospace, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.tilt-readout.is-live { border-color: rgba(61, 220, 132, 0.5); color: var(--origin); }
+
+.survey-points { display: grid; gap: 8px; }
+.spoint {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #0a1017;
+  padding: 9px 10px;
+  display: grid;
+  gap: 8px;
+}
+.spoint.is-active { border-color: var(--accent); }
+.spoint-head { display: flex; align-items: center; gap: 8px; }
+.spoint-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.spoint-name { flex: 1; font-size: 13px; font-weight: 600; }
+.spoint-elev { font: 700 13px/1 ui-monospace, Menlo, monospace; }
+.spoint-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; align-items: center; }
+.spoint-row input {
+  min-height: 36px;
+  font-size: 14px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #070b10;
+  color: var(--text);
+  font-family: ui-monospace, Menlo, monospace;
+  width: 100%;
+}
+.spoint-meta { font-size: 11px; color: var(--dim); }
+
+@media (max-width: 900px), (orientation: portrait) and (max-width: 1100px) {
+  .survey { flex-direction: column; }
+  .survey-panel {
+    flex: 0 0 auto;
+    width: 100%;
+    max-height: 52vh;
+    border-left: none;
+    border-top: 1px solid var(--line);
+  }
+  .survey-plan { flex: 1 1 auto; min-height: 40vh; }
+}
+
 /* ---------------------------------------------------------------- toast */
 
 .toast {

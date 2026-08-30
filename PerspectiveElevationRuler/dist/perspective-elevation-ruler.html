@@ -594,6 +594,100 @@ input[type="range"]::-moz-range-thumb {
 .row { display: grid; gap: 8px; }
 .row-2 { grid-template-columns: 1fr 1fr; }
 
+/* -------------------------------------------------------------- survey */
+
+.survey {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  display: flex;
+  background: var(--bg);
+}
+.survey[hidden] { display: none; }
+
+.survey-plan { position: relative; flex: 1 1 auto; min-width: 0; }
+#plan-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+
+.survey-hud {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  left: 12px;
+  right: 12px;
+  max-width: 620px;
+  background: rgba(9, 14, 20, 0.86);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font-size: 13px;
+  pointer-events: none;
+}
+.survey-hud strong { color: var(--accent); }
+.survey-zoom { bottom: max(12px, env(safe-area-inset-bottom)); }
+
+.survey-panel {
+  flex: 0 0 var(--panel-w);
+  width: var(--panel-w);
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.tilt-readout {
+  display: grid;
+  place-items: center;
+  min-height: var(--tap);
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #0a1017;
+  font: 700 18px/1 ui-monospace, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.tilt-readout.is-live { border-color: rgba(61, 220, 132, 0.5); color: var(--origin); }
+
+.survey-points { display: grid; gap: 8px; }
+.spoint {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #0a1017;
+  padding: 9px 10px;
+  display: grid;
+  gap: 8px;
+}
+.spoint.is-active { border-color: var(--accent); }
+.spoint-head { display: flex; align-items: center; gap: 8px; }
+.spoint-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.spoint-name { flex: 1; font-size: 13px; font-weight: 600; }
+.spoint-elev { font: 700 13px/1 ui-monospace, Menlo, monospace; }
+.spoint-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; align-items: center; }
+.spoint-row input {
+  min-height: 36px;
+  font-size: 14px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #070b10;
+  color: var(--text);
+  font-family: ui-monospace, Menlo, monospace;
+  width: 100%;
+}
+.spoint-meta { font-size: 11px; color: var(--dim); }
+
+@media (max-width: 900px), (orientation: portrait) and (max-width: 1100px) {
+  .survey { flex-direction: column; }
+  .survey-panel {
+    flex: 0 0 auto;
+    width: 100%;
+    max-height: 52vh;
+    border-left: none;
+    border-top: 1px solid var(--line);
+  }
+  .survey-plan { flex: 1 1 auto; min-height: 40vh; }
+}
+
 /* ---------------------------------------------------------------- toast */
 
 .toast {
@@ -779,7 +873,7 @@ input[type="range"]::-moz-range-thumb {
         <span class="mark" aria-hidden="true"></span>
         <div>
           <strong>Perspective Elevation Ruler</strong>
-          <em>Line-of-sight vertical plane · <span id="app-version">v1.5</span></em>
+          <em>Line-of-sight vertical plane · <span id="app-version">v1.6</span></em>
         </div>
       </div>
       <button class="panel-close" id="panel-close" aria-label="Hide controls">✕</button>
@@ -958,6 +1052,7 @@ input[type="range"]::-moz-range-thumb {
           <span>Eye level</span><strong id="out-eye">—</strong>
           <span>Origin distance</span><strong id="out-origin-d">—</strong>
           <span>Focal length</span><strong id="out-focal">—</strong>
+          <span>Survey check</span><strong id="out-check">—</strong>
         </div>
         <p class="warn" id="cal-warning" hidden></p>
       </section>
@@ -1116,6 +1211,7 @@ input[type="range"]::-moz-range-thumb {
       <button class="btn" id="btn-add-point">Add Point</button>
       <button class="btn" id="btn-reset">Reset</button>
       <button class="btn btn-accent" id="btn-export">Export</button>
+      <button class="btn" id="btn-survey" style="grid-column:1/-1">Site Survey — map &amp; angles</button>
     </footer>
   </aside>
 </div>
@@ -1123,6 +1219,117 @@ input[type="range"]::-moz-range-thumb {
 <!-- Hidden file inputs: `capture` opens the iPad camera directly. -->
 <input type="file" id="file-camera" accept="image/*" capture="environment" hidden>
 <input type="file" id="file-library" accept="image/*" hidden>
+
+<!-- ------------------------------------------------------------------ -->
+<!-- Site survey: pins on a plan give the distances, tilt gives the angles -->
+<!-- ------------------------------------------------------------------ -->
+<div class="survey" id="survey" hidden>
+  <div class="survey-plan">
+    <canvas id="plan-canvas"></canvas>
+    <div class="survey-hud" id="survey-hud">Import an aerial, set the scale, then place the five points.</div>
+    <div class="zoom-cluster survey-zoom">
+      <button class="zoom-btn" id="plan-in" aria-label="Zoom in">+</button>
+      <button class="zoom-btn" id="plan-out" aria-label="Zoom out">−</button>
+      <button class="zoom-btn" id="plan-fit" aria-label="Fit plan">⤢</button>
+    </div>
+  </div>
+
+  <aside class="survey-panel">
+    <header class="panel-head">
+      <div class="panel-title">
+        <span class="mark" aria-hidden="true"></span>
+        <div>
+          <strong>Site Survey</strong>
+          <em>Pins for distance · tilt for angle</em>
+        </div>
+      </div>
+      <button class="panel-close" id="survey-close" aria-label="Close survey">✕</button>
+    </header>
+
+    <div class="panel-body">
+      <section class="card">
+        <h2><i>1</i> Plan</h2>
+        <div class="row row-2">
+          <button class="btn" id="btn-aerial">Import Aerial</button>
+          <button class="btn" id="btn-plan-clear">Blank Grid</button>
+        </div>
+        <p class="hint">
+          Screenshot the property from a satellite map and import it. A blank grid
+          works too — the scale is what makes the distances real, not the picture.
+        </p>
+      </section>
+
+      <section class="card">
+        <h2><i>2</i> Scale</h2>
+        <p class="hint">
+          Drag the white bar onto something you know the length of — a driveway, a
+          garage door, a property line — then type that length.
+        </p>
+        <label class="field">
+          <span>The bar spans</span>
+          <input type="text" inputmode="decimal" id="in-scale-feet" value="40.00">
+        </label>
+        <div class="derived">
+          <span>Scale</span><strong id="out-scale">—</strong>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2><i>3</i> Shots</h2>
+        <p class="hint" id="tilt-hint">
+          Tap <strong>Read tilt</strong>, then aim the iPad at each target and shoot.
+          Angles can also be typed, which is how this works on a desktop.
+        </p>
+        <div class="row row-2">
+          <button class="btn btn-primary" id="btn-tilt">Read tilt</button>
+          <div class="tilt-readout" id="tilt-readout">—</div>
+        </div>
+        <div class="survey-points" id="survey-points"></div>
+      </section>
+
+      <section class="card">
+        <h2><i>4</i> Result</h2>
+        <div class="derived" id="survey-result">
+          <span>Instrument height</span><strong id="out-inst">—</strong>
+          <span>Foundation</span><strong id="out-found">—</strong>
+          <span>Eave</span><strong id="out-eave">—</strong>
+          <span>Peak</span><strong id="out-peak">—</strong>
+          <span>Wall height</span><strong id="out-wall">—</strong>
+          <span>Distance to wall</span><strong id="out-wall-dist">—</strong>
+          <span>Grade to curb</span><strong id="out-survey-grade">—</strong>
+        </div>
+        <p class="warn" id="survey-warn" hidden></p>
+        <button class="btn btn-accent" id="btn-apply-survey" disabled>Use for photo calibration</button>
+        <p class="hint">
+          Sends the camera height, wall height, distance and grade to the photo
+          ruler. It assumes the photo was taken from the observation point.
+        </p>
+      </section>
+
+      <section class="card card-quiet">
+        <h2>The curb assumption</h2>
+        <p class="hint">
+          The curb is taken to be level with where you stand, which is what turns
+          its shot into your instrument height. Where that is not true — a street
+          that falls past the house — switch to a measured eye height instead.
+        </p>
+        <label class="field">
+          <span>Instrument height from</span>
+          <select id="in-inst-mode">
+            <option value="curb" selected>The curb shot</option>
+            <option value="manual">A measured eye height</option>
+          </select>
+        </label>
+        <label class="field" id="wrap-inst-manual" hidden>
+          <span>Eye height</span>
+          <input type="text" inputmode="decimal" id="in-inst-height" value="5.50">
+        </label>
+      </section>
+    </div>
+  </aside>
+</div>
+
+<input type="file" id="file-aerial" accept="image/*" hidden>
 
 <!-- Export preview. On iPadOS a press-and-hold on the image is the most
      reliable route to Save to Photos, and it works where a download link
@@ -1907,6 +2114,57 @@ function initialWallSolution(ctx, preferredHeight = 5.5) {
     previous = { theta, sol };
   }
   return best ? best.sol : null;
+}
+
+/**
+ * Find the pitch that puts the wall at a known distance.
+ *
+ * A site survey measures that distance from pins on a plan, which pins down the
+ * one degree of freedom the photograph leaves open — so the horizon can be
+ * placed by measurement instead of by eye. Z is monotonic in pitch within a
+ * branch, so a scan and a bisection find it.
+ *
+ * @returns {object|null} the solution, or null if no camera puts the wall there
+ */
+function solveWallForDistance(ctx, targetDistance) {
+  if (!(targetDistance > 0)) return null;
+  const { lo, hi } = pitchDomainForAlphas(ctx.alphaFoundation, ctx.alphaWall);
+  if (!(hi > lo)) return null;
+
+  const N = 1400;
+  let previous = null;
+  let best = null;
+  for (let i = 0; i <= N; i++) {
+    const theta = lo + ((hi - lo) * i) / N;
+    const sol = solveWallFromPitch(theta, ctx);
+    if (!sol) {
+      previous = null;
+      continue;
+    }
+    if (previous) {
+      const f0 = previous.sol.originDistance - targetDistance;
+      const f1 = sol.originDistance - targetDistance;
+      if (f0 === 0) return previous.sol;
+      if (f0 > 0 !== f1 > 0) {
+        const root = bisect(
+          (th) => {
+            const x = solveWallFromPitch(th, ctx);
+            return x ? x.originDistance - targetDistance : NaN;
+          },
+          previous.theta,
+          theta,
+        );
+        const exact = root == null ? null : solveWallFromPitch(root, ctx);
+        if (exact) return exact;
+      }
+    }
+    const err = Math.abs(sol.originDistance - targetDistance);
+    if (!best || err < best.err) best = { err, sol };
+    previous = { theta, sol };
+  }
+  // Only accept a near miss; a wall the photograph cannot put there at all is
+  // a disagreement worth reporting, not one to paper over.
+  return best && best.err < targetDistance * 0.02 ? best.sol : null;
 }
 
 /**
@@ -3043,6 +3301,340 @@ class AnnotationManager {
 
 
 // ======================================================================
+// src/core/SiteSurvey.js
+// ======================================================================
+// SiteSurvey.js
+//
+// A map-based grade survey: pins on a site plan give the horizontal distances,
+// the iPad's tilt gives the angles, and the two together give elevations.
+//
+// This follows the model proven in the Upright field app — height above the
+// device is `d·tan(θ)`, and distance comes from where the pins sit rather than
+// from GPS, because a tapped pin against an aerial is far better than a 3–5 m
+// fix. What it adds is the standard five-point set for shooting a house:
+//
+//   1  OBSERVATION   where you stand, across the street. Shoots nothing.
+//   2  CURB          at the house, ASSUMED level with where you stand.
+//   3  FOUNDATION    where the wall meets the ground.
+//   4  EAVE          top of the wall.
+//   5  PEAK          the ridge.
+//
+// Point 2 is the one that does the real work. Upright cancels the device height
+// by taking two sightings from one position and differencing them, which gives
+// elevations relative to an anchor but never the height itself. Here the curb is
+// declared level with the ground you are standing on, so its sighting solves for
+// the instrument height outright:
+//
+//     elevation of curb above the device = d_curb · tan(θ_curb)
+//     elevation of curb above your feet  = 0            (the assumption)
+//  => h = −d_curb · tan(θ_curb)
+//
+// and every other point then reads absolutely against the ground you stand on:
+//
+//     E_i = h + d_i · tan(θ_i)
+//
+// That matters because the photo ruler's calibration wants exactly the
+// quantities this yields — camera height, wall height, distance to the wall and
+// the grade below the foundation. Measured, rather than typed or dragged.
+//
+// The assumption is an assumption. Where the street is not level with where you
+// stood, the instrument height can be entered by hand instead.
+
+
+/** The standard set, in the order they are shot. */
+const STANDARD_POINTS = [
+  {
+    id: 'observation',
+    name: 'Observation point',
+    hint: 'Where you stand — across the street.',
+    shoots: false,
+  },
+  {
+    id: 'curb',
+    name: 'Curb at the house',
+    hint: 'Assumed level with where you stand. This shot is what measures your instrument height.',
+    shoots: true,
+  },
+  {
+    id: 'foundation',
+    name: 'Foundation',
+    hint: 'Where the wall meets the ground. This pin is the wall.',
+    shoots: true,
+  },
+  {
+    id: 'eave',
+    name: 'Roof eave',
+    hint: 'Top of the wall — directly above the foundation, so it shares that pin.',
+    shoots: true,
+    // An eave is by definition straight above the wall it caps, so it can never
+    // have a plan position of its own.
+    placedWith: 'foundation',
+  },
+  {
+    id: 'peak',
+    name: 'Roof peak',
+    hint: 'The ridge. On a gable end it is above the wall; from the eave side it is set back, and then it needs its own pin.',
+    shoots: true,
+    // Shares the wall's pin until told otherwise, because that is right for a
+    // gable end and roughly right for a shallow roof — but a ridge seen from the
+    // gutter side stands well back, and pretending otherwise reads it too low.
+    placedWith: 'foundation',
+    canPlaceApart: true,
+  },
+];
+
+const mean = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
+
+/** Half the spread of a set of readings — how steadily the iPad was held. */
+const halfRange = (xs) =>
+  xs.length < 2 ? null : (Math.max(...xs) - Math.min(...xs)) / 2;
+
+/**
+ * The tilt of the device as an angle above horizontal, from a
+ * DeviceOrientationEvent. Level reads 0, up is positive, down is negative.
+ *
+ * `acos(cos β · cos γ)` is the angle off vertical, which is the one combination
+ * of beta and gamma that does not care how the iPad is rolled in your hands.
+ */
+function angleFromOrientation(beta, gamma) {
+  if (beta == null || Number.isNaN(beta)) return null;
+  const b = beta * DEG;
+  const g = (gamma ?? 0) * DEG;
+  const cosTilt = Math.max(-1, Math.min(1, Math.cos(b) * Math.cos(g)));
+  return (Math.acos(cosTilt) * 180) / Math.PI - 90;
+}
+
+class SiteSurvey {
+  constructor({ scaleFeetPerUnit = 1, instrumentHeightMode = 'curb', instrumentHeight = 5.5 } = {}) {
+    /** @type {Map<string, {id, plan: {x,y}|null, shots: number[]}>} */
+    this.points = new Map();
+    for (const spec of STANDARD_POINTS) {
+      this.points.set(spec.id, { id: spec.id, plan: null, shots: [] });
+    }
+    // Plan units are whatever the plan view uses (pixels of an imported
+    // aerial); the scale converts them to feet.
+    this.scaleFeetPerUnit = scaleFeetPerUnit;
+    this.instrumentHeightMode = instrumentHeightMode;
+    this.manualInstrumentHeight = instrumentHeight;
+  }
+
+  static spec(id) {
+    return STANDARD_POINTS.find((p) => p.id === id) ?? null;
+  }
+
+  point(id) {
+    return this.points.get(id) ?? null;
+  }
+
+  place(id, plan) {
+    const p = this.points.get(id);
+    if (!p) return null;
+    p.plan = plan ? { ...plan } : null;
+    return p;
+  }
+
+  /**
+   * Where a point sits on the plan, following `placedWith` when it has no pin
+   * of its own. Points stacked on one wall share one position — three pins on
+   * the same spot would be three ways to get the same distance wrong.
+   */
+  planOf(id) {
+    const own = this.points.get(id);
+    if (own?.plan) return own.plan;
+    const spec = SiteSurvey.spec(id);
+    return spec?.placedWith ? this.planOf(spec.placedWith) : null;
+  }
+
+  /** True when this point is riding on another's pin rather than its own. */
+  isShared(id) {
+    const spec = SiteSurvey.spec(id);
+    return !!spec?.placedWith && !this.points.get(id)?.plan;
+  }
+
+  addShot(id, angleDeg) {
+    const p = this.points.get(id);
+    if (!p || !Number.isFinite(angleDeg)) return null;
+    p.shots.push(angleDeg);
+    return p;
+  }
+
+  clearShots(id) {
+    const p = this.points.get(id);
+    if (p) p.shots = [];
+    return p;
+  }
+
+  angleOf(id) {
+    const p = this.points.get(id);
+    return p && p.shots.length ? mean(p.shots) : null;
+  }
+
+  /** Horizontal distance between two placed points, in feet. */
+  distance(fromId, toId) {
+    const a = this.planOf(fromId);
+    const b = this.planOf(toId);
+    if (!a || !b) return null;
+    return Math.hypot(b.x - a.x, b.y - a.y) * this.scaleFeetPerUnit;
+  }
+
+  /** Distance from where you stand to a target, in feet. */
+  distanceFromObservation(id) {
+    return this.distance('observation', id);
+  }
+
+  /**
+   * Height of the device above the ground you are standing on.
+   * @returns {{value:number, from:'curb'|'manual', reason?:string}|null}
+   */
+  instrumentHeight() {
+    if (this.instrumentHeightMode === 'manual') {
+      return { value: this.manualInstrumentHeight, from: 'manual' };
+    }
+    const d = this.distanceFromObservation('curb');
+    const angle = this.angleOf('curb');
+    if (d == null) return null;
+    if (angle == null) return null;
+    // Looking level at the curb says nothing about how high the device is: the
+    // sighting has to have some fall in it to solve for a height.
+    if (Math.abs(angle) < 0.05) {
+      return {
+        value: null,
+        from: 'curb',
+        reason: 'The curb shot is level, so it cannot measure how high the iPad was held.',
+      };
+    }
+    return { value: -d * Math.tan(angle * DEG), from: 'curb' };
+  }
+
+  /**
+   * Elevation of a point above the ground you are standing on.
+   * @returns {{feet:number, distance:number, angle:number, shots:number, repeat:number|null}|null}
+   */
+  elevationOf(id) {
+    if (id === 'observation') {
+      return { feet: 0, distance: 0, angle: null, shots: 0, repeat: null, isStation: true };
+    }
+    const h = this.instrumentHeight();
+    if (!h || h.value == null) return null;
+    const d = this.distanceFromObservation(id);
+    const p = this.points.get(id);
+    if (d == null || !p?.shots.length) return null;
+
+    // Every shot gets its own elevation, so the spread reports how steadily the
+    // iPad was held rather than being hidden inside an averaged angle.
+    const each = p.shots.map((a) => h.value + d * Math.tan(a * DEG));
+    return {
+      feet: mean(each),
+      distance: d,
+      angle: mean(p.shots),
+      shots: each.length,
+      repeat: halfRange(each),
+    };
+  }
+
+  /** Every point that can currently be resolved. */
+  elevations() {
+    const out = {};
+    for (const spec of STANDARD_POINTS) out[spec.id] = this.elevationOf(spec.id);
+    return out;
+  }
+
+  /**
+   * What the photo ruler needs, worked out from the survey.
+   *
+   * The foundation becomes the datum, which is what the building calibration
+   * expects, so everything is re-expressed against it.
+   *
+   * @returns {{ok:boolean, reason?:string, ...}}
+   */
+  calibration() {
+    const h = this.instrumentHeight();
+    if (!h) {
+      return { ok: false, reason: 'Place the observation point and the curb, and shoot the curb.' };
+    }
+    if (h.value == null) return { ok: false, reason: h.reason };
+
+    const foundation = this.elevationOf('foundation');
+    if (!foundation) {
+      return { ok: false, reason: 'Place and shoot the foundation.' };
+    }
+
+    const eave = this.elevationOf('eave');
+    const peak = this.elevationOf('peak');
+    const curbRun = this.distance('foundation', 'curb');
+
+    const out = {
+      ok: true,
+      instrumentHeight: h.value,
+      instrumentHeightFrom: h.from,
+      // The foundation is the datum the photo ruler measures from.
+      foundationElevation: foundation.feet,
+      distanceToWall: foundation.distance,
+      cameraHeightAboveFoundation: h.value - foundation.feet,
+      wallHeight: eave ? eave.feet - foundation.feet : null,
+      roofRise: eave && peak ? peak.feet - eave.feet : null,
+      peakAboveFoundation: peak ? peak.feet - foundation.feet : null,
+      // Walking from the wall out to the curb the ground loses the foundation's
+      // own height, since the curb is the datum the survey is built on.
+      gradeAwayPercent:
+        curbRun != null && curbRun > 1e-6 ? (100 * foundation.feet) / curbRun : null,
+      curbRun,
+    };
+
+    if (out.wallHeight != null && !(out.wallHeight > 0)) {
+      // An eave below its own foundation means a mis-placed pin or a shot taken
+      // at the wrong target, and it would calibrate to nonsense.
+      out.ok = false;
+      out.reason = 'The eave came out at or below the foundation — check those two pins and shots.';
+    }
+    return out;
+  }
+
+  /** A short, plain-language account of what has been done and what is missing. */
+  status() {
+    const missing = [];
+    for (const spec of STANDARD_POINTS) {
+      const p = this.points.get(spec.id);
+      // A point riding on another's pin needs no placing of its own.
+      if (!this.planOf(spec.id)) missing.push(`place ${spec.name.toLowerCase()}`);
+      else if (spec.shoots && !p.shots.length) missing.push(`shoot ${spec.name.toLowerCase()}`);
+    }
+    return { complete: missing.length === 0, missing };
+  }
+
+  toJSON() {
+    return {
+      scaleFeetPerUnit: this.scaleFeetPerUnit,
+      instrumentHeightMode: this.instrumentHeightMode,
+      manualInstrumentHeight: this.manualInstrumentHeight,
+      points: [...this.points.values()].map((p) => ({ id: p.id, plan: p.plan, shots: p.shots })),
+    };
+  }
+
+  loadJSON(data) {
+    if (!data) return this;
+    this.scaleFeetPerUnit = data.scaleFeetPerUnit ?? this.scaleFeetPerUnit;
+    this.instrumentHeightMode = data.instrumentHeightMode ?? this.instrumentHeightMode;
+    this.manualInstrumentHeight = data.manualInstrumentHeight ?? this.manualInstrumentHeight;
+    for (const saved of data.points ?? []) {
+      const p = this.points.get(saved.id);
+      if (!p) continue;
+      p.plan = saved.plan ? { ...saved.plan } : null;
+      p.shots = Array.isArray(saved.shots) ? [...saved.shots] : [];
+    }
+    return this;
+  }
+
+  /** Formatting helper shared by the panel and the plan view. */
+  static format(feet, decimals = 2) {
+    if (feet == null || !Number.isFinite(feet)) return '—';
+    const v = round(feet, decimals);
+    return `${v >= 0 ? '+' : ''}${v.toFixed(decimals)}'`;
+  }
+}
+
+
+// ======================================================================
 // src/ui/PhotoView.js
 // ======================================================================
 // PhotoView.js
@@ -3893,6 +4485,587 @@ class OverlayRenderer {
 
 
 // ======================================================================
+// src/ui/SitePlanView.js
+// ======================================================================
+// SitePlanView.js
+//
+// The map half of the survey: a plan you can drop the five standard pins onto,
+// with a scale, so distances come from where things actually are.
+//
+// It draws on a canvas rather than pulling map tiles, for two reasons. Tiles are
+// blocked outright in some hosts (a published Artifact will not load an image
+// from a tile server), and an imported aerial screenshot is what a landscaper
+// has to hand anyway — it can be zoomed to the property before capture, which
+// beats fighting a live map on an iPad in the sun. A plan with no backdrop still
+// works: pins on a grid with a typed scale measure just as well.
+//
+// Plan coordinates are the backdrop image's own pixels when there is one, and an
+// arbitrary unit space when there is not. The scale turns them into feet, so
+// nothing downstream cares which.
+
+
+
+const PIN_COLOURS = {
+  observation: '#3ddc84',
+  curb: '#8fe9ff',
+  foundation: '#ffb300',
+  eave: '#ff5cae',
+  peak: '#c9a2ff',
+};
+
+const SHORT = { observation: 'OBS', curb: 'CURB', foundation: 'FDN', eave: 'EAVE', peak: 'PEAK' };
+
+class SitePlanView {
+  constructor(canvas, { survey, onChange } = {}) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.survey = survey;
+    this.onChange = onChange;
+
+    this.backdrop = null;
+    this.planWidth = 1000;
+    this.planHeight = 1000;
+
+    this.scale = 1;
+    this.offset = { x: 0, y: 0 };
+    this.minScale = 0.02;
+    this.maxScale = 60;
+
+    // The scale bar: two draggable ends and the distance between them.
+    this.ruler = { a: { x: 300, y: 700 }, b: { x: 700, y: 700 } };
+    this.showRuler = true;
+
+    /** Which point the next tap on empty plan will place. */
+    this.placing = null;
+
+    this._pointers = new Map();
+    this._gesture = null;
+    this._raf = null;
+    this._dpr = 1;
+    this._bind();
+  }
+
+  _bind() {
+    const c = this.canvas;
+    c.style.touchAction = 'none';
+    c.addEventListener('pointerdown', this._down, { passive: false });
+    c.addEventListener('pointermove', this._move, { passive: false });
+    c.addEventListener('pointerup', this._up, { passive: false });
+    c.addEventListener('pointercancel', this._up, { passive: false });
+    c.addEventListener('wheel', this._wheel, { passive: false });
+  }
+
+  setBackdrop(image) {
+    this.backdrop = image;
+    if (image) {
+      this.planWidth = image.naturalWidth || image.width;
+      this.planHeight = image.naturalHeight || image.height;
+      // Park the scale bar across the middle of a fresh aerial.
+      this.ruler = {
+        a: { x: this.planWidth * 0.3, y: this.planHeight * 0.7 },
+        b: { x: this.planWidth * 0.7, y: this.planHeight * 0.7 },
+      };
+    }
+    this.fit();
+  }
+
+  resize() {
+    const rect = this.canvas.getBoundingClientRect();
+    if (!rect.width) return;
+    const dpr = window.devicePixelRatio || 1;
+    this._dpr = dpr;
+    this.canvas.width = Math.max(1, Math.round(rect.width * dpr));
+    this.canvas.height = Math.max(1, Math.round(rect.height * dpr));
+    this.cssWidth = rect.width;
+    this.cssHeight = rect.height;
+    this.render();
+  }
+
+  fit(padding = 24) {
+    if (!this.cssWidth) return;
+    const sx = (this.cssWidth - padding * 2) / this.planWidth;
+    const sy = (this.cssHeight - padding * 2) / this.planHeight;
+    this.scale = Math.min(sx, sy);
+    this.minScale = this.scale * 0.3;
+    this.offset = {
+      x: (this.cssWidth - this.planWidth * this.scale) / 2,
+      y: (this.cssHeight - this.planHeight * this.scale) / 2,
+    };
+    this.render();
+  }
+
+  toPlan(clientX, clientY) {
+    const rect = this.canvas.getBoundingClientRect();
+    return {
+      x: (clientX - rect.left - this.offset.x) / this.scale,
+      y: (clientY - rect.top - this.offset.y) / this.scale,
+    };
+  }
+
+  toScreen(p) {
+    return { x: p.x * this.scale + this.offset.x, y: p.y * this.scale + this.offset.y };
+  }
+
+  planTolerance(screenPx = 26) {
+    return screenPx / this.scale;
+  }
+
+  /** Feet per plan unit, from the scale bar and its stated length. */
+  setScaleFromRuler(knownFeet) {
+    const px = dist(this.ruler.a, this.ruler.b);
+    if (!(px > 1e-6) || !(knownFeet > 0)) return false;
+    this.survey.scaleFeetPerUnit = knownFeet / px;
+    this.onChange?.();
+    this.render();
+    return true;
+  }
+
+  get rulerFeet() {
+    return dist(this.ruler.a, this.ruler.b) * this.survey.scaleFeetPerUnit;
+  }
+
+  // --- gestures -----------------------------------------------------------
+
+  _hitPin(plan, tol) {
+    let best = null;
+    let bestDist = Infinity;
+    for (const spec of STANDARD_POINTS) {
+      const p = this.survey.point(spec.id);
+      if (!p?.plan) continue; // a shared point has no pin of its own to grab
+      const d = dist(p.plan, plan);
+      if (d <= tol && d < bestDist) {
+        bestDist = d;
+        best = spec.id;
+      }
+    }
+    return best;
+  }
+
+  _hitRuler(plan, tol) {
+    if (!this.showRuler) return null;
+    if (dist(this.ruler.a, plan) <= tol) return 'a';
+    if (dist(this.ruler.b, plan) <= tol) return 'b';
+    return null;
+  }
+
+  _down = (e) => {
+    e.preventDefault();
+    this.canvas.setPointerCapture?.(e.pointerId);
+    this._pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (this._pointers.size === 2) {
+      this._gesture = this._startPinch();
+      return;
+    }
+    if (this._pointers.size > 2) return;
+
+    const plan = this.toPlan(e.clientX, e.clientY);
+    const tol = this.planTolerance();
+
+    const rulerEnd = this._hitRuler(plan, tol);
+    if (rulerEnd) {
+      this._gesture = { type: 'ruler', end: rulerEnd };
+      return;
+    }
+    const pin = this._hitPin(plan, tol);
+    if (pin) {
+      this._gesture = { type: 'pin', id: pin };
+      return;
+    }
+    if (this.placing) {
+      // Placing is one tap: drop it, then fall straight into dragging so it can
+      // be nudged without lifting a finger.
+      this.survey.place(this.placing, plan);
+      this._gesture = { type: 'pin', id: this.placing };
+      this.placing = null;
+      this.onChange?.();
+      this.render();
+      return;
+    }
+    this._gesture = { type: 'pan', last: { x: e.clientX, y: e.clientY } };
+  };
+
+  _move = (e) => {
+    if (!this._pointers.has(e.pointerId)) return;
+    e.preventDefault();
+    this._pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const g = this._gesture;
+    if (!g) return;
+
+    if (g.type === 'pinch') {
+      this._updatePinch();
+      return;
+    }
+    if (g.type === 'pan') {
+      this.offset = {
+        x: this.offset.x + (e.clientX - g.last.x),
+        y: this.offset.y + (e.clientY - g.last.y),
+      };
+      g.last = { x: e.clientX, y: e.clientY };
+      this.render();
+      return;
+    }
+    const plan = this.toPlan(e.clientX, e.clientY);
+    if (g.type === 'ruler') this.ruler[g.end] = plan;
+    else if (g.type === 'pin') this.survey.place(g.id, plan);
+    this.onChange?.();
+    this.render();
+  };
+
+  _up = (e) => {
+    if (!this._pointers.has(e.pointerId)) return;
+    e.preventDefault();
+    this._pointers.delete(e.pointerId);
+    this.canvas.releasePointerCapture?.(e.pointerId);
+    if (this._gesture?.type === 'pinch') {
+      const remaining = [...this._pointers.values()][0];
+      this._gesture = remaining ? { type: 'pan', last: { ...remaining } } : null;
+      return;
+    }
+    if (this._pointers.size === 0) this._gesture = null;
+  };
+
+  _startPinch() {
+    const [a, b] = [...this._pointers.values()];
+    return {
+      type: 'pinch',
+      startDist: Math.hypot(a.x - b.x, a.y - b.y),
+      startScale: this.scale,
+      startMid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+      startOffset: { ...this.offset },
+    };
+  }
+
+  _updatePinch() {
+    const pts = [...this._pointers.values()];
+    if (pts.length < 2) return;
+    const [a, b] = pts;
+    const g = this._gesture;
+    if (g.startDist < 1) return;
+    const scale = clamp((g.startScale * Math.hypot(a.x - b.x, a.y - b.y)) / g.startDist,
+                        this.minScale, this.maxScale);
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const rect = this.canvas.getBoundingClientRect();
+    const anchor = {
+      x: (g.startMid.x - rect.left - g.startOffset.x) / g.startScale,
+      y: (g.startMid.y - rect.top - g.startOffset.y) / g.startScale,
+    };
+    this.scale = scale;
+    this.offset = { x: mid.x - rect.left - anchor.x * scale, y: mid.y - rect.top - anchor.y * scale };
+    this.render();
+  }
+
+  _wheel = (e) => {
+    e.preventDefault();
+    const rect = this.canvas.getBoundingClientRect();
+    const anchor = this.toPlan(e.clientX, e.clientY);
+    this.scale = clamp(this.scale * Math.exp(-e.deltaY * 0.0016), this.minScale, this.maxScale);
+    this.offset = {
+      x: e.clientX - rect.left - anchor.x * this.scale,
+      y: e.clientY - rect.top - anchor.y * this.scale,
+    };
+    this.render();
+  };
+
+  zoomBy(factor) {
+    const anchor = {
+      x: (this.cssWidth / 2 - this.offset.x) / this.scale,
+      y: (this.cssHeight / 2 - this.offset.y) / this.scale,
+    };
+    this.scale = clamp(this.scale * factor, this.minScale, this.maxScale);
+    this.offset = {
+      x: this.cssWidth / 2 - anchor.x * this.scale,
+      y: this.cssHeight / 2 - anchor.y * this.scale,
+    };
+    this.render();
+  }
+
+  // --- drawing ------------------------------------------------------------
+
+  render() {
+    if (this._raf) return;
+    this._raf = requestAnimationFrame(() => {
+      this._raf = null;
+      this._paint();
+    });
+  }
+
+  _paint() {
+    const ctx = this.ctx;
+    if (!this.cssWidth) return;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    ctx.save();
+    ctx.scale(this._dpr, this._dpr);
+    ctx.fillStyle = '#0a1017';
+    ctx.fillRect(0, 0, this.cssWidth, this.cssHeight);
+    ctx.translate(this.offset.x, this.offset.y);
+    ctx.scale(this.scale, this.scale);
+
+    if (this.backdrop) {
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(this.backdrop, 0, 0, this.planWidth, this.planHeight);
+    } else {
+      this._grid(ctx);
+    }
+
+    // Screen-space line weights: the plan zooms, the furniture should not.
+    const u = 1 / this.scale;
+    this._sightLines(ctx, u);
+    if (this.showRuler) this._rulerBar(ctx, u);
+    this._pins(ctx, u);
+    ctx.restore();
+  }
+
+  _grid(ctx) {
+    ctx.fillStyle = '#0d141c';
+    ctx.fillRect(0, 0, this.planWidth, this.planHeight);
+    ctx.strokeStyle = 'rgba(143,233,255,0.10)';
+    ctx.lineWidth = 1 / this.scale;
+    const step = 50;
+    ctx.beginPath();
+    for (let x = 0; x <= this.planWidth; x += step) {
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, this.planHeight);
+    }
+    for (let y = 0; y <= this.planHeight; y += step) {
+      ctx.moveTo(0, y);
+      ctx.lineTo(this.planWidth, y);
+    }
+    ctx.stroke();
+  }
+
+  _text(ctx, text, at, u, { size = 12, color = '#e8eef5', align = 'center', weight = '700' } = {}) {
+    ctx.save();
+    ctx.font = `${weight} ${size * u}px ui-monospace, "SF Mono", Menlo, monospace`;
+    ctx.textAlign = align;
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+    ctx.lineWidth = size * u * 0.34;
+    ctx.strokeText(text, at.x, at.y);
+    ctx.fillStyle = color;
+    ctx.fillText(text, at.x, at.y);
+    ctx.restore();
+  }
+
+  /** Lines from where you stood to each target, labelled with the distance. */
+  _sightLines(ctx, u) {
+    const obs = this.survey.planOf('observation');
+    if (!obs) return;
+    for (const spec of STANDARD_POINTS) {
+      if (spec.id === 'observation') continue;
+      if (this.survey.isShared(spec.id)) continue; // rides the line of the pin it shares
+      const at = this.survey.planOf(spec.id);
+      if (!at) continue;
+      ctx.save();
+      ctx.strokeStyle = PIN_COLOURS[spec.id];
+      ctx.globalAlpha = 0.5;
+      ctx.lineWidth = 1.5 * u;
+      ctx.setLineDash([6 * u, 5 * u]);
+      ctx.beginPath();
+      ctx.moveTo(obs.x, obs.y);
+      ctx.lineTo(at.x, at.y);
+      ctx.stroke();
+      ctx.restore();
+      const feet = this.survey.distanceFromObservation(spec.id);
+      if (feet != null) {
+        const mid = { x: (obs.x + at.x) / 2, y: (obs.y + at.y) / 2 };
+        this._text(ctx, `${feet.toFixed(1)}'`, mid, u, { size: 11, color: PIN_COLOURS[spec.id] });
+      }
+    }
+  }
+
+  _rulerBar(ctx, u) {
+    const { a, b } = this.ruler;
+    ctx.save();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2.5 * u;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+    for (const end of [a, b]) {
+      ctx.beginPath();
+      ctx.arc(end.x, end.y, 7 * u, 0, Math.PI * 2);
+      ctx.fillStyle = '#0a1017';
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    this._text(ctx, `SCALE ${this.rulerFeet.toFixed(1)}'`, { x: mid.x, y: mid.y - 16 * u }, u, {
+      size: 12,
+    });
+  }
+
+  _pins(ctx, u) {
+    for (const spec of STANDARD_POINTS) {
+      if (this.survey.isShared(spec.id)) continue; // drawn on the pin it shares
+      const at = this.survey.planOf(spec.id);
+      if (!at) continue;
+      const p = this.survey.point(spec.id);
+      const colour = PIN_COLOURS[spec.id];
+      const r = 9 * u;
+
+      ctx.save();
+      ctx.lineWidth = 2.4 * u;
+      ctx.strokeStyle = 'rgba(0,0,0,0.75)';
+      ctx.beginPath();
+      ctx.arc(at.x, at.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = colour;
+      ctx.lineWidth = 2 * u;
+      ctx.stroke();
+      ctx.fillStyle = colour;
+      ctx.beginPath();
+      ctx.arc(at.x, at.y, r * 0.42, 0, Math.PI * 2);
+      ctx.fill();
+      // Where you stood gets a ring, so the one station reads apart from the
+      // four targets without a legend.
+      if (spec.id === 'observation') {
+        ctx.beginPath();
+        ctx.arc(at.x, at.y, r * 1.8, 0, Math.PI * 2);
+        ctx.setLineDash([4 * u, 4 * u]);
+        ctx.strokeStyle = colour;
+        ctx.lineWidth = 1.4 * u;
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      const elev = this.survey.elevationOf(spec.id);
+      const shots = p.shots.length;
+      const line2 =
+        spec.id === 'observation'
+          ? "0.00' datum"
+          : elev
+            ? `${elev.feet >= 0 ? '+' : ''}${elev.feet.toFixed(2)}'`
+            : shots
+              ? 'needs scale'
+              : 'not shot';
+      // Name every shot this one pin carries, so a stacked wall reads as one thing.
+      const riders = STANDARD_POINTS.filter(
+        (o) => o.id !== spec.id && this.survey.isShared(o.id) && this.survey.planOf(o.id) === at,
+      ).map((o) => SHORT[o.id]);
+      this._text(ctx, [SHORT[spec.id], ...riders].join('·'), { x: at.x, y: at.y - 20 * u }, u,
+                 { size: 11, color: colour });
+      this._text(ctx, line2, { x: at.x, y: at.y + 21 * u }, u, { size: 12 });
+    }
+  }
+}
+
+
+// ======================================================================
+// src/ui/TiltSensor.js
+// ======================================================================
+// TiltSensor.js
+//
+// The iPad's tilt, as an angle above horizontal. Level reads 0, up is positive,
+// down is negative — the convention the survey maths expects.
+//
+// iOS gates DeviceOrientationEvent behind a permission call that only works from
+// a user gesture, so this is started by a button press and never on load.
+//
+// Shots are averaged over a short dwell rather than sampled once. A single frame
+// catches whatever wobble your hands were doing at that instant, and the spread
+// across the dwell is itself the useful number: it says how steadily you held
+// the thing, which is the difference between a reading you can trust and five
+// that agree beautifully and are all wrong.
+
+
+class TiltSensor {
+  constructor({ onReading } = {}) {
+    this.onReading = onReading;
+    this.angle = null;
+    this.available = typeof window !== 'undefined' && 'DeviceOrientationEvent' in window;
+    this.granted = false;
+    this.listening = false;
+    this._samples = [];
+  }
+
+  /** Whether this device wants an explicit permission grant (iOS does). */
+  get needsPermission() {
+    return (
+      typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function'
+    );
+  }
+
+  /**
+   * Ask for access and begin listening. Must be called from a user gesture on
+   * iOS, or the request is rejected without ever prompting.
+   * @returns {Promise<{ok:boolean, reason?:string}>}
+   */
+  async start() {
+    if (!this.available) {
+      return { ok: false, reason: 'This device does not report its tilt. Enter angles by hand.' };
+    }
+    if (this.needsPermission && !this.granted) {
+      try {
+        const result = await DeviceOrientationEvent.requestPermission();
+        if (result !== 'granted') {
+          return { ok: false, reason: 'Motion access was declined. Enter angles by hand.' };
+        }
+      } catch {
+        return {
+          ok: false,
+          reason: 'Motion access could not be requested. Open the page in Safari over https.',
+        };
+      }
+    }
+    this.granted = true;
+    if (!this.listening) {
+      window.addEventListener('deviceorientation', this._handle);
+      this.listening = true;
+    }
+    return { ok: true };
+  }
+
+  stop() {
+    if (this.listening) {
+      window.removeEventListener('deviceorientation', this._handle);
+      this.listening = false;
+    }
+    this._samples = [];
+    this.angle = null;
+  }
+
+  _handle = (event) => {
+    const angle = angleFromOrientation(event.beta, event.gamma);
+    if (angle == null) return;
+    this.angle = angle;
+    const now = Date.now();
+    this._samples.push({ t: now, angle });
+    // Keep a couple of seconds; anything older is not this shot.
+    const cutoff = now - 2500;
+    while (this._samples.length && this._samples[0].t < cutoff) this._samples.shift();
+    this.onReading?.(angle);
+  };
+
+  /**
+   * The reading for a shot: the mean over the last `windowMs`, with the spread
+   * that produced it.
+   *
+   * Taking a shot CONSUMES its samples. Without that, two targets shot inside
+   * the dwell window average into each other — aim at the curb, shoot, swing up
+   * to the eave, shoot, and the second reading is a blend of the two. It is
+   * silent, it looks plausible, and it is wrong by however far you swung.
+   *
+   * @returns {{angle:number, spread:number|null, samples:number}|null}
+   */
+  capture(windowMs = 700) {
+    if (this.angle == null) return null;
+    const cutoff = Date.now() - windowMs;
+    const recent = this._samples.filter((s) => s.t >= cutoff).map((s) => s.angle);
+    this._samples = [];
+    if (!recent.length) return { angle: this.angle, spread: null, samples: 1 };
+    return { angle: mean(recent), spread: halfRange(recent), samples: recent.length };
+  }
+}
+
+
+// ======================================================================
 // src/ui/ExportManager.js
 // ======================================================================
 // ExportManager.js
@@ -4111,6 +5284,9 @@ class ExportManager {
 
 
 
+
+
+
 const STORAGE_KEY = 'perspective-elevation-ruler/v1';
 
 /**
@@ -4221,8 +5397,12 @@ class App {
     this.drag = null;
     this._snapNoticeShown = false;
 
+    this.survey = new SiteSurvey();
+    this.tilt = new TiltSensor({ onReading: (a) => this._onTilt(a) });
+
     this._buildView();
     this._bindControls();
+    this._buildSurvey();
     this._restore();
     this._syncControls();
     this._recalculate();
@@ -4443,6 +5623,301 @@ class App {
     return (value) => {
       for (const b of buttons) b.setAttribute('aria-checked', String(b.dataset.value === value));
     };
+  }
+
+  // ======================================================================
+  // Site survey — pins for distance, tilt for angle
+  // ======================================================================
+
+  _buildSurvey() {
+    const $ = this.$;
+    this.plan = new SitePlanView(this.$('plan-canvas'), {
+      survey: this.survey,
+      onChange: () => this._syncSurvey(),
+    });
+
+    $('btn-survey').onclick = () => this._openSurvey(true);
+    $('survey-close').onclick = () => this._openSurvey(false);
+    $('plan-in').onclick = () => this.plan.zoomBy(1.4);
+    $('plan-out').onclick = () => this.plan.zoomBy(1 / 1.4);
+    $('plan-fit').onclick = () => this.plan.fit();
+
+    const aerial = $('file-aerial');
+    $('btn-aerial').onclick = () => aerial.click();
+    aerial.onchange = (e) => this._loadAerial(e.target.files?.[0]);
+    $('btn-plan-clear').onclick = () => {
+      this.plan.setBackdrop(null);
+      this.plan.planWidth = 1000;
+      this.plan.planHeight = 1000;
+      this.plan.fit();
+      this._syncSurvey();
+    };
+
+    const scaleField = $('in-scale-feet');
+    const commitScale = () => {
+      const parsed = Number.parseFloat(String(scaleField.value).replace(/[^0-9.]/g, ''));
+      if (Number.isFinite(parsed) && parsed > 0) this.plan.setScaleFromRuler(parsed);
+      scaleField.value = this._fmt(this.plan.rulerFeet);
+      this._syncSurvey();
+    };
+    scaleField.onchange = commitScale;
+    scaleField.onblur = commitScale;
+
+    $('btn-tilt').onclick = () => this._startTilt();
+    $('btn-apply-survey').onclick = () => this._applySurvey();
+
+    $('in-inst-mode').onchange = (e) => {
+      this.survey.instrumentHeightMode = e.target.value;
+      $('wrap-inst-manual').hidden = e.target.value !== 'manual';
+      this._syncSurvey();
+    };
+    this._numberFieldOn('in-inst-height', (v) => {
+      this.survey.manualInstrumentHeight = v;
+      this._syncSurvey();
+    });
+
+    this._buildSurveyPoints();
+  }
+
+  /** One block per standard point: place it, shoot it, or type its angle. */
+  _buildSurveyPoints() {
+    const host = this.$('survey-points');
+    host.textContent = '';
+    this._pointRows = new Map();
+
+    for (const spec of STANDARD_POINTS) {
+      const row = document.createElement('div');
+      row.className = 'spoint';
+
+      const head = document.createElement('div');
+      head.className = 'spoint-head';
+      const dot = document.createElement('span');
+      dot.className = 'spoint-dot';
+      dot.style.background = PIN_COLOURS[spec.id];
+      const name = document.createElement('span');
+      name.className = 'spoint-name';
+      name.textContent = spec.name;
+      const elev = document.createElement('span');
+      elev.className = 'spoint-elev';
+      head.append(dot, name, elev);
+
+      const controls = document.createElement('div');
+      controls.className = 'spoint-row';
+
+      const place = document.createElement('button');
+      place.className = 'btn btn-tiny';
+      place.onclick = () => {
+        if (spec.canPlaceApart && this.survey.point(spec.id).plan) {
+          // Second press puts it back on the wall's pin.
+          this.survey.place(spec.id, null);
+          this.plan.placing = null;
+        } else {
+          this.plan.placing = spec.id;
+        }
+        this._syncSurvey();
+        this.plan.render();
+      };
+
+      const angle = document.createElement('input');
+      angle.type = 'text';
+      angle.inputMode = 'decimal';
+      angle.placeholder = 'angle °';
+      angle.onchange = () => {
+        const parsed = Number.parseFloat(String(angle.value).replace(/[^0-9.+-]/g, ''));
+        if (Number.isFinite(parsed)) {
+          this.survey.clearShots(spec.id);
+          this.survey.addShot(spec.id, parsed);
+        }
+        this._syncSurvey();
+      };
+
+      const shoot = document.createElement('button');
+      shoot.className = 'btn btn-tiny';
+      shoot.textContent = 'Shoot';
+      shoot.onclick = () => this._shoot(spec.id);
+
+      // A point stacked on another's pin has nothing of its own to place — an
+      // eave is above its wall by definition. The ridge can break away, because
+      // seen from the gutter side it stands back from the wall.
+      if (spec.placedWith && !spec.canPlaceApart) controls.append(angle, shoot);
+      else if (spec.shoots) controls.append(place, angle, shoot);
+      else controls.append(place);
+
+      const meta = document.createElement('p');
+      meta.className = 'spoint-meta';
+      meta.textContent = spec.hint;
+
+      row.append(head, controls, meta);
+      host.append(row);
+      this._pointRows.set(spec.id, { row, place, angle, shoot, elev, meta });
+    }
+  }
+
+  _openSurvey(open) {
+    this.$('survey').hidden = !open;
+    if (open) {
+      requestAnimationFrame(() => {
+        this.plan.resize();
+        this.plan.fit();
+        this._syncSurvey();
+      });
+    } else {
+      this.tilt.stop();
+    }
+  }
+
+  async _loadAerial(file) {
+    if (!file) return;
+    try {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = () => reject(new Error('That image could not be read.'));
+        img.src = url;
+      });
+      this.plan.setBackdrop(img);
+      URL.revokeObjectURL(url);
+      this._syncSurvey();
+    } catch (err) {
+      this._toast(err.message, true);
+    }
+  }
+
+  async _startTilt() {
+    const result = await this.tilt.start();
+    if (!result.ok) {
+      this.$('tilt-hint').textContent = result.reason;
+      this._toast(result.reason, true);
+      return;
+    }
+    this.$('btn-tilt').textContent = 'Reading tilt';
+    this.$('btn-tilt').classList.add('is-armed');
+  }
+
+  _onTilt(angle) {
+    const el = this.$('tilt-readout');
+    el.textContent = `${angle >= 0 ? '+' : ''}${angle.toFixed(1)}°`;
+    el.classList.add('is-live');
+  }
+
+  _shoot(id) {
+    const reading = this.tilt.capture();
+    if (!reading) {
+      this._toast('No tilt reading yet — tap Read tilt, or type the angle.', true);
+      return;
+    }
+    this.survey.addShot(id, reading.angle);
+    this._syncSurvey();
+    const spread = reading.spread == null ? '' : ` · ±${reading.spread.toFixed(2)}° hold`;
+    this._toast(`${SiteSurvey.spec(id).name}: ${reading.angle.toFixed(1)}°${spread}`);
+  }
+
+  _syncSurvey() {
+    if (this.$('survey').hidden && !this._surveyEverOpened) return;
+    this._surveyEverOpened = true;
+    const f = (v, d = 2) => (v == null || !Number.isFinite(v) ? '—' : `${v.toFixed(d)}'`);
+
+    this.$('out-scale').textContent = `${this.plan.rulerFeet.toFixed(1)}' bar`;
+    this.$('in-scale-feet').value = this._fmt(this.plan.rulerFeet);
+
+    for (const spec of STANDARD_POINTS) {
+      const row = this._pointRows.get(spec.id);
+      const point = this.survey.point(spec.id);
+      const shared = this.survey.isShared(spec.id);
+      row.place.textContent = spec.canPlaceApart
+        ? (point.plan ? 'On the wall' : 'Place apart')
+        : point.plan ? 'Move' : 'Place';
+      row.row.classList.toggle('is-active', this.plan.placing === spec.id);
+      const elev = this.survey.elevationOf(spec.id);
+      row.elev.textContent = spec.id === 'observation'
+        ? "0.00'"
+        : elev ? `${elev.feet >= 0 ? '+' : ''}${elev.feet.toFixed(2)}'` : '—';
+      if (spec.shoots) {
+        const angle = this.survey.angleOf(spec.id);
+        if (angle != null && document.activeElement !== row.angle) {
+          row.angle.value = angle.toFixed(2);
+        }
+        const shots = point.shots.length;
+        const spread = elev?.repeat;
+        const where = shared ? ' · on the foundation pin' : '';
+        row.meta.textContent = shots
+          ? `${shots} shot${shots === 1 ? '' : 's'}${spread != null ? ` · ±${spread.toFixed(2)}' repeat` : ''}${where}`
+          : spec.hint;
+      }
+    }
+
+    const cal = this.survey.calibration();
+    const elevations = this.survey.elevations();
+    this.$('out-inst').textContent = f(this.survey.instrumentHeight()?.value);
+    this.$('out-found').textContent = f(elevations.foundation?.feet);
+    this.$('out-eave').textContent = f(elevations.eave?.feet);
+    this.$('out-peak').textContent = f(elevations.peak?.feet);
+    this.$('out-wall').textContent = f(cal.ok ? cal.wallHeight : null);
+    this.$('out-wall-dist').textContent = f(cal.ok ? cal.distanceToWall : null);
+    this.$('out-survey-grade').textContent =
+      cal.ok && cal.gradeAwayPercent != null ? `${cal.gradeAwayPercent.toFixed(1)}% fall` : '—';
+
+    const warn = this.$('survey-warn');
+    const status = this.survey.status();
+    if (!cal.ok && cal.reason) {
+      warn.textContent = cal.reason;
+      warn.hidden = false;
+    } else if (!status.complete) {
+      warn.textContent = `Still to do: ${status.missing.join(', ')}.`;
+      warn.hidden = false;
+    } else {
+      warn.hidden = true;
+    }
+
+    this.$('btn-apply-survey').disabled = !(cal.ok && cal.wallHeight != null);
+    this.$('survey-hud').innerHTML = this.plan.placing
+      ? `Tap the plan to place <strong>${SiteSurvey.spec(this.plan.placing).name}</strong>.`
+      : status.complete
+        ? 'Survey complete — send it to the photo ruler.'
+        : `Next: <strong>${status.missing[0]}</strong>.`;
+  }
+
+  /**
+   * Hand the survey to the photo calibration. Everything the building method
+   * asks for is measured here, including the pitch — so the horizon follows
+   * from the geometry instead of being placed by eye.
+   */
+  _applySurvey() {
+    const cal = this.survey.calibration();
+    if (!cal.ok) {
+      this._toast(cal.reason ?? 'The survey is not complete.', true);
+      return;
+    }
+    this.state.calibrationMethod = 'building';
+    this._paintMethod('building');
+    this.state.foundationElevation = 0;
+    this.state.wallHeight = cal.wallHeight;
+    this.state.gradeAwayPercent = cal.gradeAwayPercent ?? this.state.gradeAwayPercent;
+    this.surveyCalibration = cal;
+    this._surveyMismatch = null;
+    // Consumed by the next _recalculate, once the wall marks give it a sight line.
+    this._pendingSurveyDistance = cal.distanceToWall;
+    this.state.horizonPoint = null;
+    this._setRulerStyle('foundation');
+    this._syncControls();
+    this._openSurvey(false);
+    this._recalculate();
+    this._toast(
+      `Applied: wall ${cal.wallHeight.toFixed(2)}', ${cal.distanceToWall.toFixed(0)}' away.`,
+    );
+  }
+
+  /** A number field that hands its value to a callback. */
+  _numberFieldOn(id, apply) {
+    const el = this.$(id);
+    const commit = () => {
+      const parsed = Number.parseFloat(String(el.value).replace(/[^0-9.+-]/g, ''));
+      if (Number.isFinite(parsed)) apply(parsed);
+      el.value = this._fmt(Number.parseFloat(el.value) || 0);
+    };
+    el.onchange = commit;
+    el.onblur = commit;
   }
 
   /** A text field that parses a number and rejects nonsense without nagging. */
@@ -4978,7 +6453,16 @@ class App {
         wallHeight: this.state.wallHeight,
       });
       let pitchRad = null;
-      if (this.state.horizonPoint) {
+      // A survey measured the distance to the wall, which is the one thing the
+      // photograph leaves open — so use it to place the horizon rather than
+      // asking for it by eye. Only once: after that the horizon is the user's.
+      if (this._pendingSurveyDistance != null) {
+        const solved = solveWallForDistance(ctx, this._pendingSurveyDistance);
+        this._pendingSurveyDistance = null;
+        if (solved) pitchRad = solved.pitchRad;
+        else this._surveyMismatch = 'The photo cannot place the wall at the surveyed distance — check the field of view, and that the marks are on the same wall.';
+      }
+      if (pitchRad == null && this.state.horizonPoint) {
         const t = dot(sub(this.state.horizonPoint, ctx.P0), ctx.d);
         pitchRad = Math.atan2(t, ctx.focalPx);
       }
@@ -5339,14 +6823,29 @@ class App {
       set('out-cam-h', `${m.formatNumber(this.solution.cameraHeight)}${this._suffix}`);
       set('out-pitch', `${(this.solution.pitchRad * RAD).toFixed(1)}° down`);
       set('out-eye', m.formatElevation(m.originElevation + this.solution.cameraHeight));
+      const survey = this.surveyCalibration;
+      if (survey?.ok && survey.cameraHeightAboveFoundation != null) {
+        // The survey measured the camera height from the ground; the photo
+        // derives it from the geometry. They are independent, so the gap is a
+        // real check on whether the photo was taken from the observation point.
+        const gap = this.solution.cameraHeight - survey.cameraHeightAboveFoundation;
+        set('out-check',
+            `${m.formatNumber(survey.cameraHeightAboveFoundation)}${this._suffix} surveyed · ${
+              gap >= 0 ? '+' : ''}${m.formatNumber(gap)}${this._suffix} off`);
+      } else {
+        set('out-check', '—');
+      }
       set('out-origin-d', `${m.formatNumber(this.solution.originDistance)}${this._suffix}`);
       set('out-focal', `${Math.round(this.projection.focalPx)} px`);
     } else {
-      for (const id of ['out-cam-h', 'out-pitch', 'out-origin-d', 'out-focal', 'out-eye']) set(id, '—');
+      for (const id of ['out-cam-h', 'out-pitch', 'out-origin-d', 'out-focal', 'out-eye', 'out-check']) set(id, '—');
     }
 
     const warn = this.$('cal-warning');
-    if (this.calibrationError) {
+    if (this._surveyMismatch) {
+      warn.textContent = this._surveyMismatch;
+      warn.hidden = false;
+    } else if (this.calibrationError) {
       warn.textContent = this.calibrationError;
       warn.hidden = false;
     } else if (!building && this.model.isFlat && this.annotations.known) {

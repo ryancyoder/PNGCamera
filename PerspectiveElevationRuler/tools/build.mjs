@@ -24,12 +24,79 @@ const MODULES = [
   'src/core/ElevationRuler.js',
   'src/core/MeasurementAnnotation.js',
   'src/core/AnnotationManager.js',
+  'src/core/SiteSurvey.js',
   'src/ui/PhotoView.js',
   'src/ui/OverlayRenderer.js',
+  'src/ui/SitePlanView.js',
+  'src/ui/TiltSensor.js',
   'src/ui/ExportManager.js',
   'src/ui/App.js',
   'src/main.js',
 ];
+
+/**
+ * Check the list against what the modules actually import.
+ *
+ * Concatenation strips the imports, so a module left off the list does not fail
+ * the build — it produces a bundle whose references are quietly undefined, and
+ * only the browser finds out. The list has to be checked against reality, not
+ * merely written down carefully.
+ */
+function checkGraph(root, modules) {
+  const listed = new Set(modules);
+  const position = new Map(modules.map((m, i) => [m, i]));
+  const problems = [];
+
+  modules.forEach((path, index) => {
+    const source = readFileSync(join(root, path), 'utf8');
+    const dir = dirname(path);
+    for (const m of source.matchAll(/^import\s+[^;]*?from\s+['"](\.[^'"]+)['"];/gm)) {
+      // Resolve the relative specifier against this module's own directory.
+      const resolved = join(dir, m[1]).split('\\').join('/');
+      if (!listed.has(resolved)) {
+        problems.push(`${path} imports ${resolved}, which is not in MODULES`);
+      } else if (position.get(resolved) > index) {
+        problems.push(`${path} imports ${resolved}, which is listed after it`);
+      }
+    }
+  });
+
+  if (problems.length) {
+    throw new Error(`Bundle graph is wrong:\n  - ${problems.join('\n  - ')}`);
+  }
+}
+
+/**
+ * Check that no two modules declare the same top-level name.
+ *
+ * Concatenation puts every module in one scope, so two files that each define a
+ * `DEG` are a SyntaxError in the bundle and perfectly fine as modules. The
+ * source passes its tests, the bundle is dead on arrival, and nothing in
+ * between says so.
+ */
+function checkCollisions(root, modules) {
+  const seen = new Map();
+  const clashes = [];
+  const declaration = /^(?:export\s+)?(?:const|let|var|function|class|async function)\s+([A-Za-z_$][\w$]*)/;
+
+  for (const path of modules) {
+    for (const line of readFileSync(join(root, path), 'utf8').split('\n')) {
+      // Top level only: anything indented belongs to a function or a class.
+      if (/^\s/.test(line)) continue;
+      const name = line.match(declaration)?.[1];
+      if (!name) continue;
+      if (seen.has(name) && seen.get(name) !== path) {
+        clashes.push(`${name} is declared in both ${seen.get(name)} and ${path}`);
+      } else {
+        seen.set(name, path);
+      }
+    }
+  }
+
+  if (clashes.length) {
+    throw new Error(`Bundle name collisions:\n  - ${clashes.join('\n  - ')}`);
+  }
+}
 
 /** Strip module syntax so the files can share one scope. */
 function flatten(source, path) {
@@ -47,6 +114,9 @@ function flatten(source, path) {
   }
   return out;
 }
+
+checkGraph(root, MODULES);
+checkCollisions(root, MODULES);
 
 const bundle = MODULES.map((path) => {
   const source = readFileSync(join(root, path), 'utf8');

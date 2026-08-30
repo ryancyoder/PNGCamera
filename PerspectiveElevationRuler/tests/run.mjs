@@ -18,6 +18,7 @@ import { ElevationModel } from '../src/core/ElevationModel.js';
 import { ElevationRuler } from '../src/core/ElevationRuler.js';
 import { MeasurementAnnotation } from '../src/core/MeasurementAnnotation.js';
 import { DEG } from '../src/core/Geometry.js';
+import { SiteSurvey, STANDARD_POINTS, angleFromOrientation } from '../src/core/SiteSurvey.js';
 
 let passed = 0;
 let failed = 0;
@@ -719,6 +720,158 @@ group('Custom scales — the ruler uses the right one for each half', () => {
   ok('a levelling staff uses the vertical scale', staff.every((r) => r.level.noun === 'course'));
   const slope = ruler.slopeRungs();
   ok('a grade staircase uses the projected scale', slope.every((r) => r.level.noun === 'step'));
+});
+
+group('Site survey — the five standard grade shots', () => {
+  // A house across a street. The plan is in pixels; 2 ft to the pixel.
+  const survey = new SiteSurvey({ scaleFeetPerUnit: 2 });
+  survey.place('observation', { x: 0, y: 0 });
+  survey.place('curb', { x: 30, y: 0 });        // 60 ft
+  survey.place('foundation', { x: 47.5, y: 0 }); // 95 ft
+  survey.place('eave', { x: 47.5, y: 0 });
+  survey.place('peak', { x: 47.5, y: 0 });
+
+  close('distance comes from the pins and the scale', survey.distanceFromObservation('curb'), 60, 1e-9);
+  close('and from the foundation too', survey.distanceFromObservation('foundation'), 95, 1e-9);
+
+  // Nothing is measurable before the curb is shot: that shot is what fixes
+  // how high the iPad was being held.
+  ok('no elevation before the curb is shot', survey.elevationOf('foundation') === null);
+  ok('the survey says what is missing', survey.status().missing.some((m) => /shoot curb/.test(m)));
+
+  // Shoot the curb. Held at 5.50 ft over 60 ft, that is 5.24 degrees down.
+  const curbAngle = -(Math.atan(5.5 / 60) * 180) / Math.PI;
+  survey.addShot('curb', curbAngle);
+  const h = survey.instrumentHeight();
+  close('the curb shot measures the instrument height', h.value, 5.5, 1e-9);
+  ok('and says where that came from', h.from === 'curb');
+
+  // Now everything else reads absolutely, against the ground you stand on.
+  const shootTo = (id, feetAbove, distance) =>
+    survey.addShot(id, (Math.atan((feetAbove - 5.5) / distance) * 180) / Math.PI);
+  shootTo('foundation', 4.5, 95);
+  shootTo('eave', 15.5, 95);
+  shootTo('peak', 23, 95);
+
+  close('foundation elevation', survey.elevationOf('foundation').feet, 4.5, 1e-9);
+  close('eave elevation', survey.elevationOf('eave').feet, 15.5, 1e-9);
+  close('peak elevation', survey.elevationOf('peak').feet, 23, 1e-9);
+  close('the observation point is the datum', survey.elevationOf('observation').feet, 0, 1e-12);
+
+  // And that is the whole photo calibration, measured rather than typed.
+  const cal = survey.calibration();
+  ok('the survey yields a calibration', cal.ok, cal.reason);
+  close('  distance to the wall', cal.distanceToWall, 95, 1e-9);
+  close('  wall height is eave over foundation', cal.wallHeight, 11, 1e-9);
+  close('  camera height above the foundation', cal.cameraHeightAboveFoundation, 1, 1e-9);
+  close('  roof rise above the eave', cal.roofRise, 7.5, 1e-9);
+  // The yard falls 4.5 ft from the wall to the curb, over 35 ft of run.
+  close('  grade below the foundation', cal.gradeAwayPercent, (100 * 4.5) / 35, 1e-9);
+
+  ok('the survey reports itself complete', survey.status().complete);
+});
+
+group('Site survey — repeat shots and the assumptions', () => {
+  const make = () => {
+    const s = new SiteSurvey({ scaleFeetPerUnit: 1 });
+    s.place('observation', { x: 0, y: 0 });
+    s.place('curb', { x: 60, y: 0 });
+    s.place('foundation', { x: 95, y: 0 });
+    s.addShot('curb', -(Math.atan(5.5 / 60) * 180) / Math.PI);
+    return s;
+  };
+
+  // Repeat shots report spread, which measures how steadily the iPad was held.
+  const s = make();
+  const level = (Math.atan((4.5 - 5.5) / 95) * 180) / Math.PI;
+  s.addShot('foundation', level - 0.2);
+  s.addShot('foundation', level);
+  s.addShot('foundation', level + 0.2);
+  const e = s.elevationOf('foundation');
+  ok('averages the repeat shots', Math.abs(e.feet - 4.5) < 0.02, `${e.feet}`);
+  ok('counts them', e.shots === 3);
+  ok('reports the spread', e.repeat > 0.1 && e.repeat < 0.5, `${e.repeat}`);
+  ok('a single shot has no spread to report', make().addShot('foundation', level) && true);
+
+  // A level curb shot cannot solve for a height, and must say so rather than
+  // dividing by something near zero.
+  const flat = new SiteSurvey({ scaleFeetPerUnit: 1 });
+  flat.place('observation', { x: 0, y: 0 });
+  flat.place('curb', { x: 60, y: 0 });
+  flat.addShot('curb', 0);
+  const fh = flat.instrumentHeight();
+  ok('a level curb shot refuses to invent a height', fh.value === null);
+  ok('and explains why', /level/i.test(fh.reason));
+  ok('so the calibration is refused too', !flat.calibration().ok);
+
+  // The curb assumption can be dropped for a typed instrument height.
+  const manual = make();
+  manual.instrumentHeightMode = 'manual';
+  manual.manualInstrumentHeight = 5;
+  close('a typed instrument height is used instead', manual.instrumentHeight().value, 5, 1e-12);
+  ok('and is labelled as such', manual.instrumentHeight().from === 'manual');
+
+  // An eave below its own foundation is a mis-placed pin, not a calibration.
+  const bad = make();
+  bad.place('eave', { x: 95, y: 0 });
+  bad.addShot('foundation', (Math.atan((10 - 5.5) / 95) * 180) / Math.PI);
+  bad.addShot('eave', (Math.atan((6 - 5.5) / 95) * 180) / Math.PI);
+  const badCal = bad.calibration();
+  ok('an eave below the foundation is refused', !badCal.ok);
+  ok('and named as such', /eave/i.test(badCal.reason));
+});
+
+group('Site survey — tilt from the device', () => {
+  // Level is zero, whatever the roll: the angle off vertical uses beta and
+  // gamma together so holding the iPad askew does not change the reading.
+  close('flat on its back reads straight down', angleFromOrientation(0, 0), -90, 1e-9);
+  close('held upright reads level', angleFromOrientation(90, 0), 0, 1e-9);
+  close('tipped back 10 degrees reads up 10', angleFromOrientation(100, 0), 10, 1e-9);
+  close('tipped forward 10 degrees reads down 10', angleFromOrientation(80, 0), -10, 1e-9);
+  // Rolled in the hands, still level.
+  close('rolled 30 degrees while upright still reads level', angleFromOrientation(90, 30), 0, 1e-9);
+  ok('no reading without beta', angleFromOrientation(null, 0) === null);
+});
+
+group('Site survey — points stacked on one wall share one pin', () => {
+  const s = new SiteSurvey({ scaleFeetPerUnit: 1 });
+  s.place('observation', { x: 0, y: 0 });
+  s.place('curb', { x: 60, y: 0 });
+  s.place('foundation', { x: 95, y: 0 });
+
+  // An eave is above its wall by definition, so it can never carry its own pin.
+  ok('the eave rides the foundation pin', s.isShared('eave'));
+  ok('and the peak does too, by default', s.isShared('peak'));
+  close('eave distance follows the wall', s.distanceFromObservation('eave'), 95, 1e-12);
+  close('peak distance follows the wall', s.distanceFromObservation('peak'), 95, 1e-12);
+  ok('three pins is a complete placement', !s.status().missing.some((m) => /place/.test(m)));
+
+  // Seen from the gutter side the ridge stands back, so it can break away.
+  s.place('peak', { x: 108, y: 0 });
+  ok('a separately placed peak stops sharing', !s.isShared('peak'));
+  close('and uses its own distance', s.distanceFromObservation('peak'), 108, 1e-12);
+  ok('while the eave still shares', s.isShared('eave'));
+
+  // The same angle over a longer distance is a GREATER height, so a ridge left
+  // on the wall pin when it really stands back is read too low. That error is
+  // the whole reason the peak is allowed its own pin.
+  s.addShot('curb', -(Math.atan(5.5 / 60) * 180) / Math.PI);
+  s.addShot('peak', 8);
+  const setBack = s.elevationOf('peak').feet;
+  s.place('peak', null);
+  const onWall = s.elevationOf('peak').feet;
+  ok('a ridge set back reads higher than one on the wall', setBack > onWall, `${setBack} vs ${onWall}`);
+});
+
+group('Site survey — persistence', () => {
+  const s = new SiteSurvey({ scaleFeetPerUnit: 3 });
+  s.place('observation', { x: 1, y: 2 });
+  s.addShot('curb', -4);
+  const revived = new SiteSurvey().loadJSON(JSON.parse(JSON.stringify(s.toJSON())));
+  close('scale survives', revived.scaleFeetPerUnit, 3, 1e-12);
+  ok('placements survive', revived.point('observation').plan.x === 1);
+  ok('shots survive', revived.point('curb').shots.length === 1);
+  ok('the standard set is always present', STANDARD_POINTS.length === 5);
 });
 
 group('Guard rails', () => {

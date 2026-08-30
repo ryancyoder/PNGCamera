@@ -90,7 +90,7 @@
         <span class="mark" aria-hidden="true"></span>
         <div>
           <strong>Perspective Elevation Ruler</strong>
-          <em>Line-of-sight vertical plane · <span id="app-version">v1.5</span></em>
+          <em>Line-of-sight vertical plane · <span id="app-version">v1.6</span></em>
         </div>
       </div>
       <button class="panel-close" id="panel-close" aria-label="Hide controls">✕</button>
@@ -269,6 +269,7 @@
           <span>Eye level</span><strong id="out-eye">—</strong>
           <span>Origin distance</span><strong id="out-origin-d">—</strong>
           <span>Focal length</span><strong id="out-focal">—</strong>
+          <span>Survey check</span><strong id="out-check">—</strong>
         </div>
         <p class="warn" id="cal-warning" hidden></p>
       </section>
@@ -427,6 +428,7 @@
       <button class="btn" id="btn-add-point">Add Point</button>
       <button class="btn" id="btn-reset">Reset</button>
       <button class="btn btn-accent" id="btn-export">Export</button>
+      <button class="btn" id="btn-survey" style="grid-column:1/-1">Site Survey — map &amp; angles</button>
     </footer>
   </aside>
 </div>
@@ -434,6 +436,117 @@
 <!-- Hidden file inputs: `capture` opens the iPad camera directly. -->
 <input type="file" id="file-camera" accept="image/*" capture="environment" hidden>
 <input type="file" id="file-library" accept="image/*" hidden>
+
+<!-- ------------------------------------------------------------------ -->
+<!-- Site survey: pins on a plan give the distances, tilt gives the angles -->
+<!-- ------------------------------------------------------------------ -->
+<div class="survey" id="survey" hidden>
+  <div class="survey-plan">
+    <canvas id="plan-canvas"></canvas>
+    <div class="survey-hud" id="survey-hud">Import an aerial, set the scale, then place the five points.</div>
+    <div class="zoom-cluster survey-zoom">
+      <button class="zoom-btn" id="plan-in" aria-label="Zoom in">+</button>
+      <button class="zoom-btn" id="plan-out" aria-label="Zoom out">−</button>
+      <button class="zoom-btn" id="plan-fit" aria-label="Fit plan">⤢</button>
+    </div>
+  </div>
+
+  <aside class="survey-panel">
+    <header class="panel-head">
+      <div class="panel-title">
+        <span class="mark" aria-hidden="true"></span>
+        <div>
+          <strong>Site Survey</strong>
+          <em>Pins for distance · tilt for angle</em>
+        </div>
+      </div>
+      <button class="panel-close" id="survey-close" aria-label="Close survey">✕</button>
+    </header>
+
+    <div class="panel-body">
+      <section class="card">
+        <h2><i>1</i> Plan</h2>
+        <div class="row row-2">
+          <button class="btn" id="btn-aerial">Import Aerial</button>
+          <button class="btn" id="btn-plan-clear">Blank Grid</button>
+        </div>
+        <p class="hint">
+          Screenshot the property from a satellite map and import it. A blank grid
+          works too — the scale is what makes the distances real, not the picture.
+        </p>
+      </section>
+
+      <section class="card">
+        <h2><i>2</i> Scale</h2>
+        <p class="hint">
+          Drag the white bar onto something you know the length of — a driveway, a
+          garage door, a property line — then type that length.
+        </p>
+        <label class="field">
+          <span>The bar spans</span>
+          <input type="text" inputmode="decimal" id="in-scale-feet" value="40.00">
+        </label>
+        <div class="derived">
+          <span>Scale</span><strong id="out-scale">—</strong>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2><i>3</i> Shots</h2>
+        <p class="hint" id="tilt-hint">
+          Tap <strong>Read tilt</strong>, then aim the iPad at each target and shoot.
+          Angles can also be typed, which is how this works on a desktop.
+        </p>
+        <div class="row row-2">
+          <button class="btn btn-primary" id="btn-tilt">Read tilt</button>
+          <div class="tilt-readout" id="tilt-readout">—</div>
+        </div>
+        <div class="survey-points" id="survey-points"></div>
+      </section>
+
+      <section class="card">
+        <h2><i>4</i> Result</h2>
+        <div class="derived" id="survey-result">
+          <span>Instrument height</span><strong id="out-inst">—</strong>
+          <span>Foundation</span><strong id="out-found">—</strong>
+          <span>Eave</span><strong id="out-eave">—</strong>
+          <span>Peak</span><strong id="out-peak">—</strong>
+          <span>Wall height</span><strong id="out-wall">—</strong>
+          <span>Distance to wall</span><strong id="out-wall-dist">—</strong>
+          <span>Grade to curb</span><strong id="out-survey-grade">—</strong>
+        </div>
+        <p class="warn" id="survey-warn" hidden></p>
+        <button class="btn btn-accent" id="btn-apply-survey" disabled>Use for photo calibration</button>
+        <p class="hint">
+          Sends the camera height, wall height, distance and grade to the photo
+          ruler. It assumes the photo was taken from the observation point.
+        </p>
+      </section>
+
+      <section class="card card-quiet">
+        <h2>The curb assumption</h2>
+        <p class="hint">
+          The curb is taken to be level with where you stand, which is what turns
+          its shot into your instrument height. Where that is not true — a street
+          that falls past the house — switch to a measured eye height instead.
+        </p>
+        <label class="field">
+          <span>Instrument height from</span>
+          <select id="in-inst-mode">
+            <option value="curb" selected>The curb shot</option>
+            <option value="manual">A measured eye height</option>
+          </select>
+        </label>
+        <label class="field" id="wrap-inst-manual" hidden>
+          <span>Eye height</span>
+          <input type="text" inputmode="decimal" id="in-inst-height" value="5.50">
+        </label>
+      </section>
+    </div>
+  </aside>
+</div>
+
+<input type="file" id="file-aerial" accept="image/*" hidden>
 
 <!-- Export preview. On iPadOS a press-and-hold on the image is the most
      reliable route to Save to Photos, and it works where a download link

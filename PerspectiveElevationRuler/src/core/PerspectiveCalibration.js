@@ -409,6 +409,57 @@ export function initialWallSolution(ctx, preferredHeight = 5.5) {
 }
 
 /**
+ * Find the pitch that puts the wall at a known distance.
+ *
+ * A site survey measures that distance from pins on a plan, which pins down the
+ * one degree of freedom the photograph leaves open — so the horizon can be
+ * placed by measurement instead of by eye. Z is monotonic in pitch within a
+ * branch, so a scan and a bisection find it.
+ *
+ * @returns {object|null} the solution, or null if no camera puts the wall there
+ */
+export function solveWallForDistance(ctx, targetDistance) {
+  if (!(targetDistance > 0)) return null;
+  const { lo, hi } = pitchDomainForAlphas(ctx.alphaFoundation, ctx.alphaWall);
+  if (!(hi > lo)) return null;
+
+  const N = 1400;
+  let previous = null;
+  let best = null;
+  for (let i = 0; i <= N; i++) {
+    const theta = lo + ((hi - lo) * i) / N;
+    const sol = solveWallFromPitch(theta, ctx);
+    if (!sol) {
+      previous = null;
+      continue;
+    }
+    if (previous) {
+      const f0 = previous.sol.originDistance - targetDistance;
+      const f1 = sol.originDistance - targetDistance;
+      if (f0 === 0) return previous.sol;
+      if (f0 > 0 !== f1 > 0) {
+        const root = bisect(
+          (th) => {
+            const x = solveWallFromPitch(th, ctx);
+            return x ? x.originDistance - targetDistance : NaN;
+          },
+          previous.theta,
+          theta,
+        );
+        const exact = root == null ? null : solveWallFromPitch(root, ctx);
+        if (exact) return exact;
+      }
+    }
+    const err = Math.abs(sol.originDistance - targetDistance);
+    if (!best || err < best.err) best = { err, sol };
+    previous = { theta, sol };
+  }
+  // Only accept a near miss; a wall the photograph cannot put there at all is
+  // a disagreement worth reporting, not one to paper over.
+  return best && best.err < targetDistance * 0.02 ? best.sol : null;
+}
+
+/**
  * Calibrate from a building: foundation, a known height up the wall, and the
  * horizon. `pitchRad` comes straight from where the horizon is placed.
  */

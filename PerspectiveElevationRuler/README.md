@@ -72,6 +72,75 @@ allowed to start a download. Where the page is embedded in a host that mediates
 saving, the Save button goes through the host instead of offering a link that
 would quietly do nothing.
 
+## Site survey — map for distance, tilt for angle
+
+A field survey that measures what the photo calibration would otherwise ask you
+to guess. It follows the model proven in the **Upright** field app: height above
+the device is `d·tan(θ)`, and the distance comes from where pins sit on a plan,
+never from GPS — a tapped pin against an aerial beats a 3–5 m fix, and that is
+what makes the numbers worth anything.
+
+Five standard points, shot from one position:
+
+| | point | what it does |
+| --- | --- | --- |
+| 1 | Observation point | Where you stand, across the street. The datum. |
+| 2 | Curb at the house | **Assumed level with where you stand.** |
+| 3 | Foundation | Where the wall meets the ground. |
+| 4 | Roof eave | Top of the wall. |
+| 5 | Roof peak | The ridge. |
+
+Point 2 is the one that does the real work. Upright cancels the device's own
+height by differencing two sightings from one position, which gives elevations
+relative to an anchor but never the height itself. Declaring the curb level with
+the ground you are standing on solves for it outright:
+
+```
+elevation of curb above the device = d_curb · tan(θ_curb)
+elevation of curb above your feet  = 0            (the assumption)
+=>  h = −d_curb · tan(θ_curb)
+```
+
+and every other point then reads absolutely against the ground you stand on,
+`E = h + d·tan(θ)`. That matters because it yields exactly what the building
+calibration wants — camera height, wall height, distance to the wall and the
+grade below the foundation — measured rather than typed. **Use for photo
+calibration** hands them over, and the surveyed distance places the horizon, so
+the photo needs only its two wall marks.
+
+The survey measures the camera height from the ground and the photo derives it
+from the geometry. Those are independent, so the panel reports the gap between
+them as a **Survey check** — a real test of whether the photo was taken from the
+observation point.
+
+### Three pins, not five
+
+The foundation, the eave and the peak are stacked on one wall, so they share one
+pin; three pins on the same spot would be three ways to get one distance wrong.
+The eave can never have its own — it is above its wall by definition. The ridge
+can break away, because seen from the gutter side it stands back from the wall,
+and leaving it on the wall pin reads it too low.
+
+### The assumptions, stated
+
+- **The curb is level with where you stand.** Where the street falls past the
+  house it is not, and the instrument height can be a measured eye height instead.
+- **The photo was taken from the observation point.** The Survey check is what
+  catches it when it was not.
+- Angles come from `acos(cos β · cos γ)` — the tilt off vertical, which does not
+  care how the iPad is rolled in your hands. A shot averages the readings over a
+  short dwell and reports their spread, which says how steadily you held it.
+  Repeatability is not accuracy: five shots at a mis-placed pin will agree
+  beautifully and all be wrong.
+
+### Why a plan and not a live map
+
+Map tiles are images from a third-party host, and some hosts block those
+outright — a published Artifact will not load one. An imported aerial screenshot
+works everywhere, can be framed on the property before capture, and is what is
+to hand anyway. A blank grid with a typed scale measures just as well; the scale
+is what makes a distance real, not the picture.
+
 ## Two ways to calibrate
 
 **From a building** (the default). Nothing you have to supply is a horizontal
@@ -257,6 +326,7 @@ tested without a browser.
 ```
 src/core/
   Geometry.js               2D vector helpers, clipping, root finding
+  SiteSurvey.js             the five-point grade survey; pins and angles -> elevations
   PerspectiveProjection.js  the pinhole camera; world <-> photo pixels
   PerspectiveCalibration.js solves a camera from the two known points
   ElevationModel.js         elevations, increments, grade, formatting
@@ -265,6 +335,8 @@ src/core/
   AnnotationManager.js      owns points and dimensions, hit testing
 src/ui/
   PhotoView.js              canvas, view transform, pinch/pan/drag gestures
+  SitePlanView.js           the plan: aerial backdrop, scale bar, draggable pins
+  TiltSensor.js             device orientation -> shot angle, with a dwell average
   OverlayRenderer.js        draws the scene in photo pixel coordinates
   ExportManager.js          composites the export, share sheet / download
   App.js                    state, wiring, the step-by-step flow
