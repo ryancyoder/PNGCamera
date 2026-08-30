@@ -161,15 +161,17 @@ export class App {
       $('out-range').textContent = `±${this.state.range}${this._suffix}`;
       this._recalculate();
     };
-    $('in-style').onchange = (e) => {
-      this.state.rulerStyle = e.target.value;
+    this._paintStyle = this._segmented('seg-style', (value) => {
+      this.state.rulerStyle = value;
+      this._paintStyle(value);
       this._syncStyleFields();
       this._recalculate();
-    };
-    $('in-known-side').onchange = (e) => {
-      this.state.knownIsFarther = e.target.value === 'farther';
+    });
+    this._paintKnownSide = this._segmented('seg-known-side', (value) => {
+      this.state.knownIsFarther = value === 'farther';
+      this._paintKnownSide(value);
       this._recalculate();
-    };
+    });
     $('in-rung-width').oninput = (e) => {
       this.state.rungWidth = Number(e.target.value);
       $('out-rung-width').textContent = `${this.state.rungWidth}${this._suffix}`;
@@ -236,6 +238,22 @@ export class App {
       if (this._exportUrl) window.open(this._exportUrl, '_blank', 'noopener');
     };
     $('export-download').onclick = (e) => this._saveExport(e);
+  }
+
+  /**
+   * Wire a segmented control. Returns a function that paints the current
+   * selection, so the DOM is only ever written from state.
+   */
+  _segmented(id, onPick) {
+    const root = this.$(id);
+    const buttons = [...root.querySelectorAll('button[data-value]')];
+    root.addEventListener('click', (e) => {
+      const button = e.target.closest('button[data-value]');
+      if (button) onPick(button.dataset.value);
+    });
+    return (value) => {
+      for (const b of buttons) b.setAttribute('aria-checked', String(b.dataset.value === value));
+    };
   }
 
   /** A text field that parses a number and rejects nonsense without nagging. */
@@ -781,8 +799,8 @@ export class App {
     $('in-increment').value = String(s.increment);
     $('in-range').value = String(s.range);
     $('out-range').textContent = `±${s.range}${this._suffix}`;
-    $('in-style').value = s.rulerStyle;
-    $('in-known-side').value = s.knownIsFarther ? 'farther' : 'nearer';
+    this._paintStyle(s.rulerStyle);
+    this._paintKnownSide(s.knownIsFarther ? 'farther' : 'nearer');
     $('in-rung-width').value = String(s.rungWidth);
     $('out-rung-width').textContent = `${s.rungWidth}${this._suffix}`;
     $('in-label-mode').value = s.labelMode;
@@ -798,14 +816,26 @@ export class App {
     this._syncStyleFields();
   }
 
+  static STYLE_INFO = {
+    slope: ['GRADE RULER', 'Each increment is a rung where the calibrated grade reaches that elevation.'],
+    foundation: [
+      'FOUNDATION RULER',
+      "Above the zero line the increments run straight up at the origin's own distance. Below it they project out across the grade.",
+    ],
+    staff: ['LEVELLING STAFF', 'A virtual rod at one distance, graduated in elevation increments.'],
+    both: ['GRADE + STAFF', 'The grade staircase and an upright staff together.'],
+  };
+
   _syncStyleFields() {
     const foundation = this.state.rulerStyle === 'foundation';
+    const [modeName, note] = App.STYLE_INFO[this.state.rulerStyle] ?? App.STYLE_INFO.slope;
+    this.$('style-note').textContent = note;
+    this.$('plane-mode').textContent = modeName;
     // In foundation mode the upright half is pinned to the origin's own
     // distance — that is the whole point of it — so there is nothing to slide.
     const staff = !foundation && (this.state.rulerStyle !== 'slope' || this.model.isFlat);
     this.$('wrap-staff-distance').hidden = !staff;
     this.$('wrap-rung-width').hidden = this.state.rulerStyle === 'staff';
-    this.$('style-note').hidden = !foundation;
     if (staff && this.solution) {
       const slider = this.$('in-staff-distance');
       const maxD = Math.max(10, this.solution.originDistance * 4);

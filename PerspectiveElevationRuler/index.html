@@ -64,6 +64,7 @@
     </div>
 
     <div class="plane-note" id="plane-note" hidden>
+      <b id="plane-mode">GRADE RULER</b>
       Valid along the <strong>line of sight</strong> only — not across the photograph.
     </div>
 
@@ -85,7 +86,7 @@
         <span class="mark" aria-hidden="true"></span>
         <div>
           <strong>Perspective Elevation Ruler</strong>
-          <em>Line-of-sight vertical plane</em>
+          <em>Line-of-sight vertical plane · <span id="app-version">v1.2</span></em>
         </div>
       </div>
       <button class="panel-close" id="panel-close" aria-label="Hide controls">✕</button>
@@ -133,14 +134,14 @@
             <span>Horizontal distance</span>
             <input type="text" inputmode="decimal" id="in-distance" value="40.00">
           </label>
-          <label class="field">
+          <div class="field">
             <span>Point B is</span>
-            <select id="in-known-side">
-              <option value="farther" selected>Farther from you than the origin</option>
-              <option value="nearer">Nearer to you than the origin</option>
-            </select>
+            <div class="seg" id="seg-known-side" role="radiogroup" aria-label="Where Point B sits">
+              <button type="button" role="radio" data-value="farther" aria-checked="true">Farther away</button>
+              <button type="button" role="radio" data-value="nearer" aria-checked="false">Nearer to you</button>
+            </div>
             <small>Photographing a house from its yard puts the foundation at the far end, so Point B is usually the nearer one.</small>
-          </label>
+          </div>
         </div>
 
         <div class="derived" id="derived-grade">
@@ -207,19 +208,16 @@
           <input type="range" id="in-range" min="1" max="50" step="1" value="10">
         </label>
 
-        <label class="field">
+        <div class="field">
           <span>Ruler style</span>
-          <select id="in-style">
-            <option value="slope" selected>Follow the grade (staircase)</option>
-            <option value="foundation">Foundation — up the wall above 0, grade below</option>
-            <option value="staff">Levelling staff at one distance</option>
-            <option value="both">Both</option>
-          </select>
-          <small id="style-note" hidden>
-            Above the zero line the increments run straight up at the origin's own
-            distance. Below it they project out across the grade.
-          </small>
-        </label>
+          <div class="seg" id="seg-style" role="radiogroup" aria-label="Ruler style">
+            <button type="button" role="radio" data-value="slope" aria-checked="true">Follow grade</button>
+            <button type="button" role="radio" data-value="foundation" aria-checked="false">Foundation</button>
+            <button type="button" role="radio" data-value="staff" aria-checked="false">Levelling staff</button>
+            <button type="button" role="radio" data-value="both" aria-checked="false">Grade + staff</button>
+          </div>
+          <small id="style-note">Each increment is a rung where the calibrated grade reaches that elevation.</small>
+        </div>
 
         <label class="field field-slider" id="wrap-rung-width">
           <span>Ruler width <em id="out-rung-width">10'</em></span>

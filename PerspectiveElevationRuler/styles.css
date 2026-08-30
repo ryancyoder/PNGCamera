@@ -405,6 +405,41 @@ input[type="range"]::-moz-range-thumb {
   background: var(--accent); border: 3px solid #0a1017;
 }
 
+/* Segmented control: every option visible without opening anything. */
+.seg {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.seg button {
+  min-height: 40px;
+  padding: 0 8px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: #0a1017;
+  color: var(--dim);
+  font: 600 13px/1.2 -apple-system, system-ui, sans-serif;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.seg button:active { background: #16202b; }
+.seg button[aria-checked="true"] {
+  background: rgba(143, 233, 255, 0.16);
+  border-color: rgba(143, 233, 255, 0.5);
+  color: var(--accent);
+}
+.seg button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(143, 233, 255, 0.22);
+}
+
+.plane-note b {
+  color: var(--accent);
+  font: 700 10px/1 ui-monospace, Menlo, monospace;
+  letter-spacing: 0.12em;
+  margin-right: 8px;
+}
+
 .toggles { display: grid; gap: 2px; }
 .toggle {
   display: flex;

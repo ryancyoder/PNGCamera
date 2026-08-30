@@ -417,6 +417,41 @@ input[type="range"]::-moz-range-thumb {
   background: var(--accent); border: 3px solid #0a1017;
 }
 
+/* Segmented control: every option visible without opening anything. */
+.seg {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.seg button {
+  min-height: 40px;
+  padding: 0 8px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: #0a1017;
+  color: var(--dim);
+  font: 600 13px/1.2 -apple-system, system-ui, sans-serif;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.seg button:active { background: #16202b; }
+.seg button[aria-checked="true"] {
+  background: rgba(143, 233, 255, 0.16);
+  border-color: rgba(143, 233, 255, 0.5);
+  color: var(--accent);
+}
+.seg button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(143, 233, 255, 0.22);
+}
+
+.plane-note b {
+  color: var(--accent);
+  font: 700 10px/1 ui-monospace, Menlo, monospace;
+  letter-spacing: 0.12em;
+  margin-right: 8px;
+}
+
 .toggles { display: grid; gap: 2px; }
 .toggle {
   display: flex;
@@ -689,6 +724,7 @@ input[type="range"]::-moz-range-thumb {
     </div>
 
     <div class="plane-note" id="plane-note" hidden>
+      <b id="plane-mode">GRADE RULER</b>
       Valid along the <strong>line of sight</strong> only — not across the photograph.
     </div>
 
@@ -710,7 +746,7 @@ input[type="range"]::-moz-range-thumb {
         <span class="mark" aria-hidden="true"></span>
         <div>
           <strong>Perspective Elevation Ruler</strong>
-          <em>Line-of-sight vertical plane</em>
+          <em>Line-of-sight vertical plane · <span id="app-version">v1.2</span></em>
         </div>
       </div>
       <button class="panel-close" id="panel-close" aria-label="Hide controls">✕</button>
@@ -758,14 +794,14 @@ input[type="range"]::-moz-range-thumb {
             <span>Horizontal distance</span>
             <input type="text" inputmode="decimal" id="in-distance" value="40.00">
           </label>
-          <label class="field">
+          <div class="field">
             <span>Point B is</span>
-            <select id="in-known-side">
-              <option value="farther" selected>Farther from you than the origin</option>
-              <option value="nearer">Nearer to you than the origin</option>
-            </select>
+            <div class="seg" id="seg-known-side" role="radiogroup" aria-label="Where Point B sits">
+              <button type="button" role="radio" data-value="farther" aria-checked="true">Farther away</button>
+              <button type="button" role="radio" data-value="nearer" aria-checked="false">Nearer to you</button>
+            </div>
             <small>Photographing a house from its yard puts the foundation at the far end, so Point B is usually the nearer one.</small>
-          </label>
+          </div>
         </div>
 
         <div class="derived" id="derived-grade">
@@ -832,19 +868,16 @@ input[type="range"]::-moz-range-thumb {
           <input type="range" id="in-range" min="1" max="50" step="1" value="10">
         </label>
 
-        <label class="field">
+        <div class="field">
           <span>Ruler style</span>
-          <select id="in-style">
-            <option value="slope" selected>Follow the grade (staircase)</option>
-            <option value="foundation">Foundation — up the wall above 0, grade below</option>
-            <option value="staff">Levelling staff at one distance</option>
-            <option value="both">Both</option>
-          </select>
-          <small id="style-note" hidden>
-            Above the zero line the increments run straight up at the origin's own
-            distance. Below it they project out across the grade.
-          </small>
-        </label>
+          <div class="seg" id="seg-style" role="radiogroup" aria-label="Ruler style">
+            <button type="button" role="radio" data-value="slope" aria-checked="true">Follow grade</button>
+            <button type="button" role="radio" data-value="foundation" aria-checked="false">Foundation</button>
+            <button type="button" role="radio" data-value="staff" aria-checked="false">Levelling staff</button>
+            <button type="button" role="radio" data-value="both" aria-checked="false">Grade + staff</button>
+          </div>
+          <small id="style-note">Each increment is a rung where the calibrated grade reaches that elevation.</small>
+        </div>
 
         <label class="field field-slider" id="wrap-rung-width">
           <span>Ruler width <em id="out-rung-width">10'</em></span>
@@ -3720,15 +3753,17 @@ class App {
       $('out-range').textContent = `±${this.state.range}${this._suffix}`;
       this._recalculate();
     };
-    $('in-style').onchange = (e) => {
-      this.state.rulerStyle = e.target.value;
+    this._paintStyle = this._segmented('seg-style', (value) => {
+      this.state.rulerStyle = value;
+      this._paintStyle(value);
       this._syncStyleFields();
       this._recalculate();
-    };
-    $('in-known-side').onchange = (e) => {
-      this.state.knownIsFarther = e.target.value === 'farther';
+    });
+    this._paintKnownSide = this._segmented('seg-known-side', (value) => {
+      this.state.knownIsFarther = value === 'farther';
+      this._paintKnownSide(value);
       this._recalculate();
-    };
+    });
     $('in-rung-width').oninput = (e) => {
       this.state.rungWidth = Number(e.target.value);
       $('out-rung-width').textContent = `${this.state.rungWidth}${this._suffix}`;
@@ -3795,6 +3830,22 @@ class App {
       if (this._exportUrl) window.open(this._exportUrl, '_blank', 'noopener');
     };
     $('export-download').onclick = (e) => this._saveExport(e);
+  }
+
+  /**
+   * Wire a segmented control. Returns a function that paints the current
+   * selection, so the DOM is only ever written from state.
+   */
+  _segmented(id, onPick) {
+    const root = this.$(id);
+    const buttons = [...root.querySelectorAll('button[data-value]')];
+    root.addEventListener('click', (e) => {
+      const button = e.target.closest('button[data-value]');
+      if (button) onPick(button.dataset.value);
+    });
+    return (value) => {
+      for (const b of buttons) b.setAttribute('aria-checked', String(b.dataset.value === value));
+    };
   }
 
   /** A text field that parses a number and rejects nonsense without nagging. */
@@ -4340,8 +4391,8 @@ class App {
     $('in-increment').value = String(s.increment);
     $('in-range').value = String(s.range);
     $('out-range').textContent = `±${s.range}${this._suffix}`;
-    $('in-style').value = s.rulerStyle;
-    $('in-known-side').value = s.knownIsFarther ? 'farther' : 'nearer';
+    this._paintStyle(s.rulerStyle);
+    this._paintKnownSide(s.knownIsFarther ? 'farther' : 'nearer');
     $('in-rung-width').value = String(s.rungWidth);
     $('out-rung-width').textContent = `${s.rungWidth}${this._suffix}`;
     $('in-label-mode').value = s.labelMode;
@@ -4357,14 +4408,26 @@ class App {
     this._syncStyleFields();
   }
 
+  static STYLE_INFO = {
+    slope: ['GRADE RULER', 'Each increment is a rung where the calibrated grade reaches that elevation.'],
+    foundation: [
+      'FOUNDATION RULER',
+      "Above the zero line the increments run straight up at the origin's own distance. Below it they project out across the grade.",
+    ],
+    staff: ['LEVELLING STAFF', 'A virtual rod at one distance, graduated in elevation increments.'],
+    both: ['GRADE + STAFF', 'The grade staircase and an upright staff together.'],
+  };
+
   _syncStyleFields() {
     const foundation = this.state.rulerStyle === 'foundation';
+    const [modeName, note] = App.STYLE_INFO[this.state.rulerStyle] ?? App.STYLE_INFO.slope;
+    this.$('style-note').textContent = note;
+    this.$('plane-mode').textContent = modeName;
     // In foundation mode the upright half is pinned to the origin's own
     // distance — that is the whole point of it — so there is nothing to slide.
     const staff = !foundation && (this.state.rulerStyle !== 'slope' || this.model.isFlat);
     this.$('wrap-staff-distance').hidden = !staff;
     this.$('wrap-rung-width').hidden = this.state.rulerStyle === 'staff';
-    this.$('style-note').hidden = !foundation;
     if (staff && this.solution) {
       const slider = this.$('in-staff-distance');
       const maxD = Math.max(10, this.solution.originDistance * 4);
