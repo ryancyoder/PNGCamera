@@ -14,6 +14,13 @@ export class ElevationModel {
     knownElevation = 103,
     horizontalDistance = 40,
     increment = 1,
+    // The two halves of a foundation ruler measure different things, so they
+    // get their own scales: courses up a wall, risers out across the grade.
+    // `increment` sets both, which is what a single-scale ruler wants.
+    verticalIncrement = null,
+    projectedIncrement = null,
+    verticalNoun = '',
+    projectedNoun = '',
     range = 10,
     unitSuffix = "'",
     decimals = 2,
@@ -24,6 +31,10 @@ export class ElevationModel {
     this.knownElevation = knownElevation;
     this.horizontalDistance = horizontalDistance;
     this.increment = increment;
+    this.verticalIncrement = verticalIncrement ?? increment;
+    this.projectedIncrement = projectedIncrement ?? increment;
+    this.verticalNoun = verticalNoun;
+    this.projectedNoun = projectedNoun;
     this.range = range;
     this.unitSuffix = unitSuffix;
     this.decimals = decimals;
@@ -90,27 +101,78 @@ export class ElevationModel {
   }
 
   /**
-   * The elevation increments to draw, from -range to +range around the origin.
-   * Offsets are snapped onto exact multiples of the increment so floating point
-   * accumulation never drifts the labels.
+   * Build the increments for one scale. Offsets are snapped onto exact
+   * multiples so floating point accumulation never drifts the labels, and each
+   * level carries every wording the renderer might want.
+   *
+   * @param {number} increment  step size in world units
+   * @param {object} o
+   * @param {number} o.fromIndex first multiple to emit (inclusive)
+   * @param {number} o.toIndex   last multiple to emit (inclusive)
+   * @param {string} o.noun      what one step of this scale is called, if anything
    */
-  levels() {
-    const inc = this.increment > 0 ? this.increment : 1;
-    const steps = Math.floor(this.range / inc + 1e-9);
+  levelsFor(increment, { fromIndex, toIndex, noun = '' } = {}) {
+    const inc = increment > 0 ? increment : 1;
+    const span = Math.floor(this.range / inc + 1e-9);
+    const lo = fromIndex ?? -span;
+    const hi = toIndex ?? span;
     const out = [];
-    for (let k = -steps; k <= steps; k++) {
+    for (let k = lo; k <= hi; k++) {
       const offset = round(k * inc, 6);
+      const count = Math.abs(k);
       out.push({
         index: k,
         offset,
         elevation: round(this.elevationFor(offset), 6),
         isOrigin: k === 0,
-        isMajor: Math.abs(round((k * inc) % 1, 6)) < 1e-9,
+        // A counted scale makes every line meaningful — one course, one riser —
+        // so none of them is a minor tick.
+        isMajor: noun ? true : Math.abs(round((k * inc) % 1, 6)) < 1e-9,
         label: this.formatElevation(this.elevationFor(offset)),
         change: this.formatChange(offset),
+        count,
+        noun,
+        countLabel: noun ? this.formatCount(count, noun) : null,
       });
     }
     return out;
+  }
+
+  /** The whole ruler on one scale, for the styles that do not split at zero. */
+  levels() {
+    return this.levelsFor(this.increment);
+  }
+
+  /** Above the datum: measured straight up, so the vertical scale. */
+  levelsAbove() {
+    const inc = this.verticalIncrement > 0 ? this.verticalIncrement : 1;
+    return this.levelsFor(inc, {
+      fromIndex: 1,
+      toIndex: Math.floor(this.range / inc + 1e-9),
+      noun: this.verticalNoun,
+    });
+  }
+
+  /** The datum and below: projected across the grade, so the projected scale. */
+  levelsBelow() {
+    const inc = this.projectedIncrement > 0 ? this.projectedIncrement : 1;
+    return this.levelsFor(inc, {
+      fromIndex: -Math.floor(this.range / inc + 1e-9),
+      toIndex: 0,
+      noun: this.projectedNoun,
+    });
+  }
+
+  /** How many whole units of a scale fit into an offset. */
+  countFor(offset, increment) {
+    if (!(increment > 0)) return null;
+    return Math.abs(offset) / increment;
+  }
+
+  formatCount(count, noun, decimals = 0) {
+    const n = round(count, decimals);
+    const shown = decimals > 0 ? n.toFixed(decimals) : String(Math.round(n));
+    return `${shown} ${noun}${Math.abs(n - 1) < 1e-9 ? '' : 's'}`;
   }
 
   // --- formatting ---------------------------------------------------------
@@ -157,6 +219,10 @@ export class ElevationModel {
       horizontalDistance: this.horizontalDistance,
       increment: this.increment,
       range: this.range,
+      verticalIncrement: this.verticalIncrement,
+      projectedIncrement: this.projectedIncrement,
+      verticalNoun: this.verticalNoun,
+      projectedNoun: this.projectedNoun,
       unitSuffix: this.unitSuffix,
       decimals: this.decimals,
       knownIsFarther: this.knownIsFarther,

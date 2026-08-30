@@ -60,6 +60,10 @@
         <span class="readout-key">Distance</span>
         <span class="readout-value" id="readout-dist">—</span>
       </div>
+      <div class="readout-row" id="readout-count-row" hidden>
+        <span class="readout-key" id="readout-count-key">Steps</span>
+        <span class="readout-value" id="readout-count">—</span>
+      </div>
       <div class="readout-tag" id="readout-tag">PROJECTED</div>
     </div>
 
@@ -86,7 +90,7 @@
         <span class="mark" aria-hidden="true"></span>
         <div>
           <strong>Perspective Elevation Ruler</strong>
-          <em>Line-of-sight vertical plane · <span id="app-version">v1.4</span></em>
+          <em>Line-of-sight vertical plane · <span id="app-version">v1.5</span></em>
         </div>
       </div>
       <button class="panel-close" id="panel-close" aria-label="Hide controls">✕</button>
@@ -273,16 +277,53 @@
       <section class="card" data-step="5">
         <h2><i>4</i> Elevation Ruler</h2>
 
-        <label class="field">
-          <span>Elevation increment</span>
-          <select id="in-increment">
-            <option value="0.1">0.10</option>
-            <option value="0.25">0.25</option>
-            <option value="0.5">0.50</option>
-            <option value="1" selected>1.00</option>
-            <option value="2">2.00</option>
-          </select>
-        </label>
+        <!-- Two scales, because the two halves measure different things:
+             courses up a wall, risers out across the grade. -->
+        <div class="scale" id="scale-vertical">
+          <h3>Above zero · vertical</h3>
+          <label class="field">
+            <span>Scale</span>
+            <select id="in-vertical-preset"></select>
+          </label>
+          <div class="scale-custom" id="custom-vertical" hidden>
+            <label class="field">
+              <span>Size</span>
+              <input type="text" inputmode="decimal" id="in-vertical-size" value="1">
+            </label>
+            <label class="field">
+              <span>Units</span>
+              <select id="in-vertical-unit"></select>
+            </label>
+            <label class="field">
+              <span>Count as</span>
+              <input type="text" id="in-vertical-noun" placeholder="course" autocapitalize="none">
+            </label>
+          </div>
+          <p class="hint" id="out-vertical-scale">1.00' per step</p>
+        </div>
+
+        <div class="scale" id="scale-projected">
+          <h3>Below zero · projected</h3>
+          <label class="field">
+            <span>Scale</span>
+            <select id="in-projected-preset"></select>
+          </label>
+          <div class="scale-custom" id="custom-projected" hidden>
+            <label class="field">
+              <span>Size</span>
+              <input type="text" inputmode="decimal" id="in-projected-size" value="1">
+            </label>
+            <label class="field">
+              <span>Units</span>
+              <select id="in-projected-unit"></select>
+            </label>
+            <label class="field">
+              <span>Count as</span>
+              <input type="text" id="in-projected-noun" placeholder="step" autocapitalize="none">
+            </label>
+          </div>
+          <p class="hint" id="out-projected-scale">1.00' per step</p>
+        </div>
 
         <label class="field field-slider">
           <span>Display range <em id="out-range">±10'</em></span>
@@ -316,7 +357,10 @@
           <select id="in-label-mode">
             <option value="elevation" selected>Elevation (104.00')</option>
             <option value="change">Change (+4.00')</option>
+            <option value="count">Count (6 steps)</option>
+            <option value="countElevation">Count and change (6 steps · -3.75')</option>
           </select>
+          <small>Counting needs a scale that has something to count, like courses or steps.</small>
         </label>
       </section>
 

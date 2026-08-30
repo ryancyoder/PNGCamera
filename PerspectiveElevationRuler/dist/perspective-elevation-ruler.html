@@ -458,6 +458,25 @@ input[type="range"]::-moz-range-thumb {
   margin-right: 8px;
 }
 
+.scale {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 11px;
+  display: grid;
+  gap: 9px;
+  background: #0a1017;
+}
+.scale h3 {
+  margin: 0;
+  font: 700 11px/1 ui-monospace, Menlo, monospace;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.scale-custom { display: grid; gap: 9px; }
+.scale-custom[hidden] { display: none; }
+.scale .hint { font-variant-numeric: tabular-nums; }
+
 .toggles { display: grid; gap: 2px; }
 .toggle {
   display: flex;
@@ -730,6 +749,10 @@ input[type="range"]::-moz-range-thumb {
         <span class="readout-key">Distance</span>
         <span class="readout-value" id="readout-dist">—</span>
       </div>
+      <div class="readout-row" id="readout-count-row" hidden>
+        <span class="readout-key" id="readout-count-key">Steps</span>
+        <span class="readout-value" id="readout-count">—</span>
+      </div>
       <div class="readout-tag" id="readout-tag">PROJECTED</div>
     </div>
 
@@ -756,7 +779,7 @@ input[type="range"]::-moz-range-thumb {
         <span class="mark" aria-hidden="true"></span>
         <div>
           <strong>Perspective Elevation Ruler</strong>
-          <em>Line-of-sight vertical plane · <span id="app-version">v1.4</span></em>
+          <em>Line-of-sight vertical plane · <span id="app-version">v1.5</span></em>
         </div>
       </div>
       <button class="panel-close" id="panel-close" aria-label="Hide controls">✕</button>
@@ -943,16 +966,53 @@ input[type="range"]::-moz-range-thumb {
       <section class="card" data-step="5">
         <h2><i>4</i> Elevation Ruler</h2>
 
-        <label class="field">
-          <span>Elevation increment</span>
-          <select id="in-increment">
-            <option value="0.1">0.10</option>
-            <option value="0.25">0.25</option>
-            <option value="0.5">0.50</option>
-            <option value="1" selected>1.00</option>
-            <option value="2">2.00</option>
-          </select>
-        </label>
+        <!-- Two scales, because the two halves measure different things:
+             courses up a wall, risers out across the grade. -->
+        <div class="scale" id="scale-vertical">
+          <h3>Above zero · vertical</h3>
+          <label class="field">
+            <span>Scale</span>
+            <select id="in-vertical-preset"></select>
+          </label>
+          <div class="scale-custom" id="custom-vertical" hidden>
+            <label class="field">
+              <span>Size</span>
+              <input type="text" inputmode="decimal" id="in-vertical-size" value="1">
+            </label>
+            <label class="field">
+              <span>Units</span>
+              <select id="in-vertical-unit"></select>
+            </label>
+            <label class="field">
+              <span>Count as</span>
+              <input type="text" id="in-vertical-noun" placeholder="course" autocapitalize="none">
+            </label>
+          </div>
+          <p class="hint" id="out-vertical-scale">1.00' per step</p>
+        </div>
+
+        <div class="scale" id="scale-projected">
+          <h3>Below zero · projected</h3>
+          <label class="field">
+            <span>Scale</span>
+            <select id="in-projected-preset"></select>
+          </label>
+          <div class="scale-custom" id="custom-projected" hidden>
+            <label class="field">
+              <span>Size</span>
+              <input type="text" inputmode="decimal" id="in-projected-size" value="1">
+            </label>
+            <label class="field">
+              <span>Units</span>
+              <select id="in-projected-unit"></select>
+            </label>
+            <label class="field">
+              <span>Count as</span>
+              <input type="text" id="in-projected-noun" placeholder="step" autocapitalize="none">
+            </label>
+          </div>
+          <p class="hint" id="out-projected-scale">1.00' per step</p>
+        </div>
 
         <label class="field field-slider">
           <span>Display range <em id="out-range">±10'</em></span>
@@ -986,7 +1046,10 @@ input[type="range"]::-moz-range-thumb {
           <select id="in-label-mode">
             <option value="elevation" selected>Elevation (104.00')</option>
             <option value="change">Change (+4.00')</option>
+            <option value="count">Count (6 steps)</option>
+            <option value="countElevation">Count and change (6 steps · -3.75')</option>
           </select>
+          <small>Counting needs a scale that has something to count, like courses or steps.</small>
         </label>
       </section>
 
@@ -1998,6 +2061,13 @@ class ElevationModel {
     knownElevation = 103,
     horizontalDistance = 40,
     increment = 1,
+    // The two halves of a foundation ruler measure different things, so they
+    // get their own scales: courses up a wall, risers out across the grade.
+    // `increment` sets both, which is what a single-scale ruler wants.
+    verticalIncrement = null,
+    projectedIncrement = null,
+    verticalNoun = '',
+    projectedNoun = '',
     range = 10,
     unitSuffix = "'",
     decimals = 2,
@@ -2008,6 +2078,10 @@ class ElevationModel {
     this.knownElevation = knownElevation;
     this.horizontalDistance = horizontalDistance;
     this.increment = increment;
+    this.verticalIncrement = verticalIncrement ?? increment;
+    this.projectedIncrement = projectedIncrement ?? increment;
+    this.verticalNoun = verticalNoun;
+    this.projectedNoun = projectedNoun;
     this.range = range;
     this.unitSuffix = unitSuffix;
     this.decimals = decimals;
@@ -2074,27 +2148,78 @@ class ElevationModel {
   }
 
   /**
-   * The elevation increments to draw, from -range to +range around the origin.
-   * Offsets are snapped onto exact multiples of the increment so floating point
-   * accumulation never drifts the labels.
+   * Build the increments for one scale. Offsets are snapped onto exact
+   * multiples so floating point accumulation never drifts the labels, and each
+   * level carries every wording the renderer might want.
+   *
+   * @param {number} increment  step size in world units
+   * @param {object} o
+   * @param {number} o.fromIndex first multiple to emit (inclusive)
+   * @param {number} o.toIndex   last multiple to emit (inclusive)
+   * @param {string} o.noun      what one step of this scale is called, if anything
    */
-  levels() {
-    const inc = this.increment > 0 ? this.increment : 1;
-    const steps = Math.floor(this.range / inc + 1e-9);
+  levelsFor(increment, { fromIndex, toIndex, noun = '' } = {}) {
+    const inc = increment > 0 ? increment : 1;
+    const span = Math.floor(this.range / inc + 1e-9);
+    const lo = fromIndex ?? -span;
+    const hi = toIndex ?? span;
     const out = [];
-    for (let k = -steps; k <= steps; k++) {
+    for (let k = lo; k <= hi; k++) {
       const offset = round(k * inc, 6);
+      const count = Math.abs(k);
       out.push({
         index: k,
         offset,
         elevation: round(this.elevationFor(offset), 6),
         isOrigin: k === 0,
-        isMajor: Math.abs(round((k * inc) % 1, 6)) < 1e-9,
+        // A counted scale makes every line meaningful — one course, one riser —
+        // so none of them is a minor tick.
+        isMajor: noun ? true : Math.abs(round((k * inc) % 1, 6)) < 1e-9,
         label: this.formatElevation(this.elevationFor(offset)),
         change: this.formatChange(offset),
+        count,
+        noun,
+        countLabel: noun ? this.formatCount(count, noun) : null,
       });
     }
     return out;
+  }
+
+  /** The whole ruler on one scale, for the styles that do not split at zero. */
+  levels() {
+    return this.levelsFor(this.increment);
+  }
+
+  /** Above the datum: measured straight up, so the vertical scale. */
+  levelsAbove() {
+    const inc = this.verticalIncrement > 0 ? this.verticalIncrement : 1;
+    return this.levelsFor(inc, {
+      fromIndex: 1,
+      toIndex: Math.floor(this.range / inc + 1e-9),
+      noun: this.verticalNoun,
+    });
+  }
+
+  /** The datum and below: projected across the grade, so the projected scale. */
+  levelsBelow() {
+    const inc = this.projectedIncrement > 0 ? this.projectedIncrement : 1;
+    return this.levelsFor(inc, {
+      fromIndex: -Math.floor(this.range / inc + 1e-9),
+      toIndex: 0,
+      noun: this.projectedNoun,
+    });
+  }
+
+  /** How many whole units of a scale fit into an offset. */
+  countFor(offset, increment) {
+    if (!(increment > 0)) return null;
+    return Math.abs(offset) / increment;
+  }
+
+  formatCount(count, noun, decimals = 0) {
+    const n = round(count, decimals);
+    const shown = decimals > 0 ? n.toFixed(decimals) : String(Math.round(n));
+    return `${shown} ${noun}${Math.abs(n - 1) < 1e-9 ? '' : 's'}`;
   }
 
   // --- formatting ---------------------------------------------------------
@@ -2141,6 +2266,10 @@ class ElevationModel {
       horizontalDistance: this.horizontalDistance,
       increment: this.increment,
       range: this.range,
+      verticalIncrement: this.verticalIncrement,
+      projectedIncrement: this.projectedIncrement,
+      verticalNoun: this.verticalNoun,
+      projectedNoun: this.projectedNoun,
       unitSuffix: this.unitSuffix,
       decimals: this.decimals,
       knownIsFarther: this.knownIsFarther,
@@ -2261,7 +2390,10 @@ class ElevationRuler {
   slopeRungs(options = {}) {
     if (this.model.isFlat) return [];
     const out = [];
-    for (const level of this.model.levels()) {
+    // A grade staircase is entirely projected, so it runs on the projected scale.
+    for (const level of this.model.levelsFor(this.model.projectedIncrement, {
+      noun: this.model.projectedNoun,
+    })) {
       const Z = this.distanceForOffset(level.offset);
       if (Z == null || !(Z > 1e-6)) continue;
       out.push(this._rung(level, level.offset, Z, this.rungWidth));
@@ -2278,16 +2410,18 @@ class ElevationRuler {
   foundationRungs(options = {}) {
     const above = [];
     const below = [];
-    for (const level of this.model.levels()) {
-      if (level.offset > 0) {
-        // Straight up, at the foundation's own distance from the camera.
-        above.push(this._rung(level, level.offset, this.originDistance, this.rungWidth));
-      } else {
-        // Out across the grade, where the ground actually reaches that level.
-        const Z = this.distanceForOffset(level.offset);
-        if (Z == null || !(Z > 1e-6)) continue;
-        below.push(this._rung(level, level.offset, Z, this.rungWidth));
-      }
+    // Each half runs on its own scale: courses up the wall, risers out across
+    // the grade. They are different measurements, so a shared increment would
+    // only ever suit one of them.
+    for (const level of this.model.levelsAbove()) {
+      // Straight up, at the foundation's own distance from the camera.
+      above.push(this._rung(level, level.offset, this.originDistance, this.rungWidth));
+    }
+    for (const level of this.model.levelsBelow()) {
+      // Out across the grade, where the ground actually reaches that level.
+      const Z = this.distanceForOffset(level.offset);
+      if (Z == null || !(Z > 1e-6)) continue;
+      below.push(this._rung(level, level.offset, Z, this.rungWidth));
     }
     // Prune each half on its own: they run in different directions, so a single
     // depth-ordered pass would interleave them and cull the wrong rungs.
@@ -2308,7 +2442,10 @@ class ElevationRuler {
   staffRungs(Z = this.originDistance, options = {}) {
     if (!(Z > 1e-6)) return [];
     const out = [];
-    for (const level of this.model.levels()) {
+    // A staff is entirely vertical, so it runs on the vertical scale.
+    for (const level of this.model.levelsFor(this.model.verticalIncrement, {
+      noun: this.model.verticalNoun,
+    })) {
       out.push(this._rung(level, level.offset, Z, level.isOrigin ? this.staffWidth * 2 : this.staffWidth));
     }
     // A staff is one object at one distance: spacing shrinks but nothing
@@ -3284,6 +3421,20 @@ class OverlayRenderer {
     return true;
   }
 
+  /**
+   * What a rung says. A counted scale answers the question people actually ask
+   * — "how many steps up to the house" — so it wins when one is set, and falls
+   * back to the elevation when the scale has nothing to count.
+   */
+  _rungText(level, mode) {
+    if ((mode === 'count' || mode === 'countElevation') && level.countLabel) {
+      return mode === 'count'
+        ? level.countLabel
+        : `${level.countLabel} · ${level.change}`;
+    }
+    return mode === 'change' ? level.change : level.label;
+  }
+
   _stroke(ctx, path, { color, width, halo = true, alpha = 1, dash = null }) {
     ctx.save();
     ctx.globalAlpha *= alpha;
@@ -3523,7 +3674,7 @@ class OverlayRenderer {
       const at = add(r.right, scale(dir, 10 * u));
       // The origin is the datum: it is always labelled, whatever else is culled.
       if (!this._claimLabelSlot(at, minLabelGap, major)) continue;
-      const text = options.labelMode === 'change' ? r.level.change : r.level.label;
+      const text = this._rungText(r.level, options.labelMode);
       this._label(ctx, text, at, u, {
         size: major ? 20 : 17,
         color: major ? PALETTE.origin : PALETTE.text,
@@ -3551,7 +3702,7 @@ class OverlayRenderer {
       const dir = normalize(sub(r.right, r.left));
       const at = add(r.right, scale(dir, 8 * u));
       if (!this._claimLabelSlot(at, minStaffGap, major)) continue;
-      const text = options.labelMode === 'change' ? r.level.change : r.level.label;
+      const text = this._rungText(r.level, options.labelMode);
       this._label(ctx, text, at, u, {
         size: major ? 19 : 16,
         color: major ? PALETTE.origin : PALETTE.text,
@@ -3644,6 +3795,10 @@ class OverlayRenderer {
         lines.push({ text: model.formatElevation(p.elevation), size: 19, color: PALETTE.text, weight: '700' });
         if (p.role !== 'origin') {
           lines.push({ text: model.formatChange(p.offset), size: 16, color: PALETTE.text, weight: '600' });
+        }
+        const count = options.countFor?.(p);
+        if (count) {
+          lines.push({ text: count, size: 15, color: PALETTE.rung, weight: '700' });
         }
         if (options.showDistances && p.distance != null) {
           lines.push({
@@ -3958,6 +4113,50 @@ class ExportManager {
 
 const STORAGE_KEY = 'perspective-elevation-ruler/v1';
 
+/**
+ * How big one step of a scale is, in world units. World units are feet or
+ * metres depending on the app's unit setting, so the imperial and metric
+ * preset tables are separate rather than converted between.
+ */
+const SIZE_IN_WORLD = { in: 1 / 12, ft: 1, mm: 0.001, cm: 0.01, m: 1 };
+
+const SCALE_PRESETS = {
+  ft: {
+    vertical: [
+      { id: 'ft1', label: '1 ft', size: 1, sizeUnit: 'ft', noun: '' },
+      { id: 'in6', label: '6 in', size: 6, sizeUnit: 'in', noun: '' },
+      { id: 'siding55', label: 'Siding course — 5½ in', size: 5.5, sizeUnit: 'in', noun: 'course' },
+      { id: 'siding7', label: 'Siding course — 7 in', size: 7, sizeUnit: 'in', noun: 'course' },
+      { id: 'block8', label: 'Block course — 8 in', size: 8, sizeUnit: 'in', noun: 'course' },
+      { id: 'brick', label: 'Brick course — 2⅔ in', size: 8 / 3, sizeUnit: 'in', noun: 'course' },
+    ],
+    projected: [
+      { id: 'ft1', label: '1 ft', size: 1, sizeUnit: 'ft', noun: '' },
+      { id: 'in6', label: '6 in', size: 6, sizeUnit: 'in', noun: '' },
+      { id: 'step75', label: 'Step riser — 7½ in', size: 7.5, sizeUnit: 'in', noun: 'step' },
+      { id: 'step7', label: 'Step riser — 7 in', size: 7, sizeUnit: 'in', noun: 'step' },
+      { id: 'step6', label: 'Step riser — 6 in', size: 6, sizeUnit: 'in', noun: 'step' },
+      { id: 'tread', label: 'Timber tie — 5½ in', size: 5.5, sizeUnit: 'in', noun: 'tie' },
+    ],
+  },
+  m: {
+    vertical: [
+      { id: 'm025', label: '0.25 m', size: 0.25, sizeUnit: 'm', noun: '' },
+      { id: 'm01', label: '0.10 m', size: 0.1, sizeUnit: 'm', noun: '' },
+      { id: 'course140', label: 'Course — 140 mm', size: 140, sizeUnit: 'mm', noun: 'course' },
+      { id: 'block190', label: 'Block course — 190 mm', size: 190, sizeUnit: 'mm', noun: 'course' },
+    ],
+    projected: [
+      { id: 'm025', label: '0.25 m', size: 0.25, sizeUnit: 'm', noun: '' },
+      { id: 'm01', label: '0.10 m', size: 0.1, sizeUnit: 'm', noun: '' },
+      { id: 'step175', label: 'Step riser — 175 mm', size: 175, sizeUnit: 'mm', noun: 'step' },
+      { id: 'step190', label: 'Step riser — 190 mm', size: 190, sizeUnit: 'mm', noun: 'step' },
+    ],
+  },
+};
+
+const SIZE_UNITS = { ft: ['in', 'ft'], m: ['mm', 'cm', 'm'] };
+
 const STEP_TEXT = {
   1: ['STEP 1', 'Take or choose a photograph looking across the slope.'],
   2: ['STEP 2', 'Tap the <strong>origin</strong> — the point whose elevation you know.'],
@@ -3985,6 +4184,8 @@ class App {
       knownElevation: 103,
       horizontalDistance: 40,
       increment: 1,
+      verticalScale: { preset: 'ft1', size: 1, sizeUnit: 'ft', noun: '' },
+      projectedScale: { preset: 'ft1', size: 1, sizeUnit: 'ft', noun: '' },
       range: 10,
       unit: 'ft',
       fovDeg: 60,
@@ -4090,6 +4291,7 @@ class App {
       // and out across the grade; open ground is measured along the grade.
       this._setRulerStyle(value === 'building' ? 'foundation' : 'slope');
       this._syncMethodFields();
+    this._syncScales();
       this._recalculate();
       this._arm('origin');
     });
@@ -4134,10 +4336,8 @@ class App {
     };
 
     // --- ruler ------------------------------------------------------------
-    $('in-increment').onchange = (e) => {
-      this.state.increment = Number(e.target.value);
-      this._recalculate();
-    };
+    this._bindScale('vertical', 'verticalScale');
+    this._bindScale('projected', 'projectedScale');
     $('in-range').oninput = (e) => {
       this.state.range = Number(e.target.value);
       $('out-range').textContent = `±${this.state.range}${this._suffix}`;
@@ -4190,6 +4390,15 @@ class App {
 
     $('in-units').onchange = (e) => {
       this.state.unit = e.target.value;
+      // Imperial and metric scales are different lists, not conversions of each
+      // other, so switching units re-picks a sensible default for each half.
+      const system = this.state.unit === 'm' ? 'm' : 'ft';
+      for (const [which, key] of [['vertical', 'verticalScale'], ['projected', 'projectedScale']]) {
+        if (!SCALE_PRESETS[system][which].some((x) => x.id === this.state[key].preset)) {
+          const fallback = SCALE_PRESETS[system][which][0];
+          this.state[key] = { ...fallback, preset: fallback.id };
+        }
+      }
       this._recalculate();
       this._syncControls();
     };
@@ -4374,8 +4583,12 @@ class App {
     const blocks = [];
     for (const p of this.annotations.points.values()) {
       // Name line, elevation, and (except at the origin) the change.
-      const rows = p.role === 'origin' ? 2 : 3;
-      const height = (13 * 1.34 + 19 * 1.34 + (rows > 2 ? 16 * 1.34 : 0)) * unit;
+      // Name line, elevation, the change (except at the origin), and a count
+      // line when the scale governing this point counts something.
+      const hasChange = p.role !== 'origin';
+      const hasCount = !!this._countLabelFor(p);
+      const height =
+        (13 * 1.34 + 19 * 1.34 + (hasChange ? 16 * 1.34 : 0) + (hasCount ? 15 * 1.34 : 0)) * unit;
       const top = p.imagePoint.y + (p.labelMoved ? p.labelOffset.y : off.y) * unit;
       blocks.push({ point: p, height, top });
     }
@@ -4601,6 +4814,99 @@ class App {
   // Calibration
   // ======================================================================
 
+  /** One step of a scale, expressed in world units. */
+  _scaleSize(scale) {
+    const world = Number(scale.size) * (SIZE_IN_WORLD[scale.sizeUnit] ?? 1);
+    return world > 0 ? world : 1;
+  }
+
+  _presetsFor(which) {
+    return SCALE_PRESETS[this.state.unit === 'm' ? 'm' : 'ft'][which];
+  }
+
+  /** Build the scale controls for one half of the ruler. */
+  _bindScale(which, key) {
+    const preset = this.$(`in-${which}-preset`);
+    const size = this.$(`in-${which}-size`);
+    const unit = this.$(`in-${which}-unit`);
+    const noun = this.$(`in-${which}-noun`);
+
+    preset.onchange = () => {
+      const chosen = this._presetsFor(which).find((x) => x.id === preset.value);
+      this.state[key] = chosen
+        ? { preset: chosen.id, size: chosen.size, sizeUnit: chosen.sizeUnit, noun: chosen.noun }
+        // Custom: keep what is already there and open the fields to edit.
+        : { ...this.state[key], preset: 'custom' };
+      this._syncScales();
+      this._recalculate();
+    };
+
+    const commitCustom = () => {
+      const parsed = Number.parseFloat(String(size.value).replace(/[^0-9.]/g, ''));
+      this.state[key] = {
+        preset: 'custom',
+        size: Number.isFinite(parsed) && parsed > 0 ? parsed : this.state[key].size,
+        sizeUnit: unit.value,
+        noun: noun.value.trim(),
+      };
+      this._syncScales();
+      this._recalculate();
+    };
+    size.onchange = commitCustom;
+    size.onblur = commitCustom;
+    unit.onchange = commitCustom;
+    noun.onchange = commitCustom;
+    noun.onblur = commitCustom;
+    for (const el of [size, noun]) {
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') el.blur();
+      });
+    }
+  }
+
+  /** Repaint both scale blocks from state, including the preset lists. */
+  _syncScales() {
+    const system = this.state.unit === 'm' ? 'm' : 'ft';
+    for (const [which, key] of [['vertical', 'verticalScale'], ['projected', 'projectedScale']]) {
+      const scale = this.state[key];
+      const presets = this._presetsFor(which);
+
+      const select = this.$(`in-${which}-preset`);
+      select.textContent = '';
+      for (const preset of [...presets, { id: 'custom', label: 'Custom…' }]) {
+        const option = document.createElement('option');
+        option.value = preset.id;
+        option.textContent = preset.label;
+        select.append(option);
+      }
+      // A preset from the other unit system cannot be offered, so such a scale
+      // falls back to custom, which still carries the size the user had.
+      const known = presets.some((x) => x.id === scale.preset);
+      select.value = known ? scale.preset : 'custom';
+
+      const unitSelect = this.$(`in-${which}-unit`);
+      unitSelect.textContent = '';
+      for (const u of SIZE_UNITS[system]) {
+        const option = document.createElement('option');
+        option.value = u;
+        option.textContent = u;
+        unitSelect.append(option);
+      }
+      unitSelect.value = SIZE_UNITS[system].includes(scale.sizeUnit) ? scale.sizeUnit : system;
+
+      this.$(`custom-${which}`).hidden = known;
+      this.$(`in-${which}-size`).value = String(Math.round(Number(scale.size) * 1e4) / 1e4);
+      this.$(`in-${which}-noun`).value = scale.noun ?? '';
+
+      const world = this._scaleSize(scale);
+      const perUnit = system === 'm' ? 'metre' : 'foot';
+      this.$(`out-${which}-scale`).textContent = scale.noun
+        ? `${this.model.formatNumber(world)}${this._suffix} per ${scale.noun} · ${
+            Math.round((1 / world) * 10) / 10} ${scale.noun}s per ${perUnit}`
+        : `${this.model.formatNumber(world)}${this._suffix} per line`;
+    }
+  }
+
   _setRulerStyle(value) {
     this.state.rulerStyle = value;
     this._paintStyle(value);
@@ -4619,6 +4925,10 @@ class App {
   _buildModel() {
     const common = {
       increment: this.state.increment,
+      verticalIncrement: this._scaleSize(this.state.verticalScale),
+      projectedIncrement: this._scaleSize(this.state.projectedScale),
+      verticalNoun: this.state.verticalScale.noun,
+      projectedNoun: this.state.projectedScale.noun,
       range: this.state.range,
       unitSuffix: this.state.unit === 'm' ? 'm' : "'",
     };
@@ -4876,6 +5186,7 @@ class App {
         showHorizon: this.state.showHorizon,
         showCrosshair: this.state.showCrosshair,
         showDistances: this.state.showDistances,
+        countFor: (point) => this._countLabelFor(point),
         horizonActive: this.drag?.horizon === true,
         horizonHint: this.state.showHorizon && !this.annotations.measurements.length,
         rulerStyle: this.state.rulerStyle,
@@ -4929,7 +5240,6 @@ class App {
     $('in-fov').value = String(s.fovDeg);
     $('out-fov').textContent = `${s.fovDeg}°`;
     $('in-solve-mode').value = s.solveMode;
-    $('in-increment').value = String(s.increment);
     $('in-range').value = String(s.range);
     $('out-range').textContent = `±${s.range}${this._suffix}`;
     this._paintStyle(s.rulerStyle);
@@ -4938,6 +5248,7 @@ class App {
     $('in-foundation-elev').value = this._fmt(s.foundationElevation);
     $('in-wall-height').value = this._fmt(s.wallHeight);
     this._syncMethodFields();
+    this._syncScales();
     $('in-rung-width').value = String(s.rungWidth);
     $('out-rung-width').textContent = `${s.rungWidth}${this._suffix}`;
     $('in-label-mode').value = s.labelMode;
@@ -5136,9 +5447,41 @@ class App {
       point.valid && point.distance != null
         ? `${m.formatNumber(point.distance)}${this._suffix}`
         : '—';
+    // The count is the answer people actually want out of a step scale — how
+    // many risers from here up to the house — so it gets its own line whenever
+    // the scale that governs this point has something to count.
+    const countRow = this.$('readout-count-row');
+    const scale = point.valid && point.offset > 0 ? this.state.verticalScale : this.state.projectedScale;
+    const usesScale =
+      this.state.rulerStyle === 'foundation'
+        ? true
+        : this.state.rulerStyle === 'staff'
+          ? this.state.verticalScale.noun
+          : this.state.projectedScale.noun;
+    if (point.valid && scale.noun && usesScale) {
+      const size = this._scaleSize(scale);
+      const count = m.countFor(point.offset, size);
+      countRow.hidden = false;
+      this.$('readout-count-key').textContent = `${scale.noun}s`;
+      this.$('readout-count').textContent = m.formatCount(count, scale.noun, count % 1 > 1e-6 ? 1 : 0);
+    } else {
+      countRow.hidden = true;
+    }
+
     const tag = this.$('readout-tag');
     tag.textContent = point.valid ? (point.isMeasured ? 'MEASURED' : 'PROJECTED') : 'NO READING';
     tag.classList.toggle('measured', point.isMeasured);
+  }
+
+  /** "6 steps" for a point, when the scale governing it counts something. */
+  _countLabelFor(point) {
+    if (!point?.valid || point.offset == null) return null;
+    const scale = point.offset > 0 ? this.state.verticalScale : this.state.projectedScale;
+    if (!scale.noun) return null;
+    if (this.state.rulerStyle === 'slope' && point.offset > 0) return null;
+    const count = this.model.countFor(point.offset, this._scaleSize(scale));
+    if (count == null || count < 1e-9) return null;
+    return this.model.formatCount(count, scale.noun, count % 1 > 1e-6 ? 1 : 0);
   }
 
   _updateStep() {
@@ -5193,6 +5536,8 @@ class App {
       knownElevation: 103,
       horizontalDistance: 40,
       increment: 1,
+      verticalScale: { preset: 'ft1', size: 1, sizeUnit: 'ft', noun: '' },
+      projectedScale: { preset: 'ft1', size: 1, sizeUnit: 'ft', noun: '' },
       range: 10,
       fovDeg: 60,
       solveMode: 'height',
@@ -5330,6 +5675,14 @@ class App {
     // as a foundation and a wall, quietly changing what the numbers mean.
     const restored = payload.state ?? {};
     if (restored.calibrationMethod == null) restored.calibrationMethod = 'twoPoint';
+    // A session saved before the ruler had two scales carries a single
+    // increment. Carry it into both halves rather than silently resetting the
+    // ruler to whole feet.
+    if (restored.verticalScale == null && restored.increment > 0) {
+      const carried = { preset: 'custom', size: restored.increment, sizeUnit: 'ft', noun: '' };
+      restored.verticalScale = { ...carried };
+      restored.projectedScale = { ...carried };
+    }
     Object.assign(this.state, restored, { tool: 'select' });
     this.model = this._buildModel();
 

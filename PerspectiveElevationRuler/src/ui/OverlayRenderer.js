@@ -96,6 +96,20 @@ export class OverlayRenderer {
     return true;
   }
 
+  /**
+   * What a rung says. A counted scale answers the question people actually ask
+   * — "how many steps up to the house" — so it wins when one is set, and falls
+   * back to the elevation when the scale has nothing to count.
+   */
+  _rungText(level, mode) {
+    if ((mode === 'count' || mode === 'countElevation') && level.countLabel) {
+      return mode === 'count'
+        ? level.countLabel
+        : `${level.countLabel} · ${level.change}`;
+    }
+    return mode === 'change' ? level.change : level.label;
+  }
+
   _stroke(ctx, path, { color, width, halo = true, alpha = 1, dash = null }) {
     ctx.save();
     ctx.globalAlpha *= alpha;
@@ -335,7 +349,7 @@ export class OverlayRenderer {
       const at = add(r.right, scale(dir, 10 * u));
       // The origin is the datum: it is always labelled, whatever else is culled.
       if (!this._claimLabelSlot(at, minLabelGap, major)) continue;
-      const text = options.labelMode === 'change' ? r.level.change : r.level.label;
+      const text = this._rungText(r.level, options.labelMode);
       this._label(ctx, text, at, u, {
         size: major ? 20 : 17,
         color: major ? PALETTE.origin : PALETTE.text,
@@ -363,7 +377,7 @@ export class OverlayRenderer {
       const dir = normalize(sub(r.right, r.left));
       const at = add(r.right, scale(dir, 8 * u));
       if (!this._claimLabelSlot(at, minStaffGap, major)) continue;
-      const text = options.labelMode === 'change' ? r.level.change : r.level.label;
+      const text = this._rungText(r.level, options.labelMode);
       this._label(ctx, text, at, u, {
         size: major ? 19 : 16,
         color: major ? PALETTE.origin : PALETTE.text,
@@ -456,6 +470,10 @@ export class OverlayRenderer {
         lines.push({ text: model.formatElevation(p.elevation), size: 19, color: PALETTE.text, weight: '700' });
         if (p.role !== 'origin') {
           lines.push({ text: model.formatChange(p.offset), size: 16, color: PALETTE.text, weight: '600' });
+        }
+        const count = options.countFor?.(p);
+        if (count) {
+          lines.push({ text: count, size: 15, color: PALETTE.rung, weight: '700' });
         }
         if (options.showDistances && p.distance != null) {
           lines.push({

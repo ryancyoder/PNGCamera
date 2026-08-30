@@ -106,7 +106,10 @@ export class ElevationRuler {
   slopeRungs(options = {}) {
     if (this.model.isFlat) return [];
     const out = [];
-    for (const level of this.model.levels()) {
+    // A grade staircase is entirely projected, so it runs on the projected scale.
+    for (const level of this.model.levelsFor(this.model.projectedIncrement, {
+      noun: this.model.projectedNoun,
+    })) {
       const Z = this.distanceForOffset(level.offset);
       if (Z == null || !(Z > 1e-6)) continue;
       out.push(this._rung(level, level.offset, Z, this.rungWidth));
@@ -123,16 +126,18 @@ export class ElevationRuler {
   foundationRungs(options = {}) {
     const above = [];
     const below = [];
-    for (const level of this.model.levels()) {
-      if (level.offset > 0) {
-        // Straight up, at the foundation's own distance from the camera.
-        above.push(this._rung(level, level.offset, this.originDistance, this.rungWidth));
-      } else {
-        // Out across the grade, where the ground actually reaches that level.
-        const Z = this.distanceForOffset(level.offset);
-        if (Z == null || !(Z > 1e-6)) continue;
-        below.push(this._rung(level, level.offset, Z, this.rungWidth));
-      }
+    // Each half runs on its own scale: courses up the wall, risers out across
+    // the grade. They are different measurements, so a shared increment would
+    // only ever suit one of them.
+    for (const level of this.model.levelsAbove()) {
+      // Straight up, at the foundation's own distance from the camera.
+      above.push(this._rung(level, level.offset, this.originDistance, this.rungWidth));
+    }
+    for (const level of this.model.levelsBelow()) {
+      // Out across the grade, where the ground actually reaches that level.
+      const Z = this.distanceForOffset(level.offset);
+      if (Z == null || !(Z > 1e-6)) continue;
+      below.push(this._rung(level, level.offset, Z, this.rungWidth));
     }
     // Prune each half on its own: they run in different directions, so a single
     // depth-ordered pass would interleave them and cull the wrong rungs.
@@ -153,7 +158,10 @@ export class ElevationRuler {
   staffRungs(Z = this.originDistance, options = {}) {
     if (!(Z > 1e-6)) return [];
     const out = [];
-    for (const level of this.model.levels()) {
+    // A staff is entirely vertical, so it runs on the vertical scale.
+    for (const level of this.model.levelsFor(this.model.verticalIncrement, {
+      noun: this.model.verticalNoun,
+    })) {
       out.push(this._rung(level, level.offset, Z, level.isOrigin ? this.staffWidth * 2 : this.staffWidth));
     }
     // A staff is one object at one distance: spacing shrinks but nothing

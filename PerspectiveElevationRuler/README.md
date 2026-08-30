@@ -96,16 +96,18 @@ building to measure against. That is the workflow below.
    elevation, the horizontal distance between the two, and whether it is nearer
    to you or farther away than the origin. Photographing a house from its yard
    puts the foundation at the far end, so Point B is often the nearer one.
-4. **Line of sight.** It runs through both reference points and is drawn
+4. **Scale.** Set what one line means for each half of the ruler — a siding
+   course above, a step riser below — or leave both at whole feet.
+5. **Line of sight.** It runs through both reference points and is drawn
    through the picture to its vanishing point. Drag either point to re-aim it.
-5. **Calibrate.** Set the perspective strength, then fine-tune. If you can see
+6. **Calibrate.** Set the perspective strength, then fine-tune. If you can see
    where the horizon falls in the photograph, **drag it** — that is usually the
    quickest and most reliable route. Otherwise fine-tune by camera height or
    line-of-sight distance. Both reference points stay pinned to the pixels you
    tapped whatever you change.
-6. **Measure.** Tap `Add Point` and tap along the sight line. Drag a point and
+7. **Measure.** Tap `Add Point` and tap along the sight line. Drag a point and
    its elevation updates continuously.
-7. **Annotate and export.** Select two points for a vertical dimension,
+8. **Annotate and export.** Select two points for a vertical dimension,
    horizontal distance, or slope/grade label, then export a PNG.
 
 The original photograph is never modified — the export composites into a new
@@ -216,6 +218,32 @@ Three styles, all projected rather than drawn:
 - **Levelling staff** — a virtual rod at one distance, graduated in elevation.
   Nothing recedes, but the graduations still converge on the vertical vanishing
   point, so they open out or close up depending on which way the camera tilts.
+
+### Scales
+
+The two halves of a foundation ruler measure different things, so each has its
+own scale. Above the datum you are counting up a wall; below it you are counting
+out across the ground. A single increment can only ever suit one of them.
+
+Either half can be set to a real building dimension — a 5½ in siding course, an
+8 in block course, a 7½ in step riser — or to anything you type in inches. Give a
+scale something to count and the ruler will label it that way:
+
+```
+                    ────────────  20 courses
+                    ────────────  15 courses
+  FOUNDATION  ══════════════════   0.00'
+         ──────────────────────    2 steps
+    ────────────────────────────   4 steps
+```
+
+which answers the question people actually ask standing in a yard — *how many
+steps to get up to the house* — rather than making them divide a decimal
+elevation by a riser height in their head. Tapped points carry the same count,
+so a spot 3 ft below the foundation reads `4.8 steps` as well as `-3.00'`.
+
+A grade staircase is entirely projected and a levelling staff is entirely
+vertical, so those two styles take the scale that matches what they measure.
 
 Equal real-world increments are never equally spaced in pixels. The test suite
 asserts exactly that.

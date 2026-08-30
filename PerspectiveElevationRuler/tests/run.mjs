@@ -626,6 +626,101 @@ group('Stated grade below the foundation', () => {
   close('a 1 ft drop sits 50 ft out from the wall', ruler.distanceForOffset(-1), 20, 1e-9);
 });
 
+group('Custom scales — courses up the wall, risers across the grade', () => {
+  const IN = 1 / 12;
+  const model = new ElevationModel({
+    originElevation: 0,
+    range: 8,
+    verticalIncrement: 5.5 * IN,   // siding course
+    projectedIncrement: 7.5 * IN,  // step riser
+    verticalNoun: 'course',
+    projectedNoun: 'step',
+    slopeOverride: 0.06,
+  });
+
+  const above = model.levelsAbove();
+  const below = model.levelsBelow();
+
+  // Level offsets are snapped to 6 decimals so labels cannot drift, and 5.5/12
+  // is not exact in binary, so compare at that precision — 1e-6 ft is a
+  // ten-thousandth of an inch.
+  const SNAP = 1e-6;
+  ok('the two halves run on different scales',
+     Math.abs(above[0].offset - 5.5 * IN) < SNAP && Math.abs(below.at(-2).offset + 7.5 * IN) < SNAP,
+     `${above[0].offset} / ${below.at(-2).offset}`);
+  ok('nothing above the datum appears in the lower half', below.every((l) => l.offset <= 0));
+  ok('nothing at or below the datum appears in the upper half', above.every((l) => l.offset > 0));
+  ok('the datum belongs to the lower half exactly once',
+     below.filter((l) => l.offset === 0).length === 1);
+
+  // 8 ft of range at 5.5 in is 17 courses; at 7.5 in it is 12 risers plus zero.
+  ok('course count fills the range', above.length === 17, `got ${above.length}`);
+  ok('riser count fills the range', below.length === 13, `got ${below.length}`);
+
+  // The whole point: counting, not elevations.
+  ok('a course is labelled as one', above[0].countLabel === '1 course', above[0].countLabel);
+  ok('several courses are pluralised', above[5].countLabel === '6 courses', above[5].countLabel);
+  ok('risers count downwards from the datum',
+     below.at(-4).countLabel === '3 steps', below.at(-4).countLabel);
+  ok('the datum counts as nothing', below.at(-1).countLabel === '0 steps');
+  ok('every counted line is significant', above.every((l) => l.isMajor));
+
+  // Elevations still have to be right underneath the counting.
+  close('six courses is 2.75 ft', above[5].offset, 2.75, 1e-12);
+  close('three risers is 1.875 ft down', below.at(-4).offset, -1.875, 1e-12);
+
+  // How many steps to get up to the house, from 3 ft below it.
+  close('3 ft below the foundation is 4.8 risers', model.countFor(-3, 7.5 * IN), 4.8, 1e-12);
+  ok('and reads as such', model.formatCount(4.8, 'step', 1) === '4.8 steps');
+
+  // A scale with nothing to count says nothing.
+  const plain = new ElevationModel({ originElevation: 0, range: 4, increment: 1 });
+  ok('a plain scale has no count label', plain.levelsAbove()[0].countLabel === null);
+  ok('and marks whole units as major', plain.levelsAbove()[0].isMajor === true);
+});
+
+group('Custom scales — the ruler uses the right one for each half', () => {
+  const IN = 1 / 12;
+  const cam = makeCamera({ fovDeg: 65, pitchDeg: 14, cameraHeight: 6 });
+  const model = new ElevationModel({
+    originElevation: 0,
+    range: 6,
+    verticalIncrement: 5.5 * IN,
+    projectedIncrement: 7.5 * IN,
+    verticalNoun: 'course',
+    projectedNoun: 'step',
+    slopeOverride: 0.06,
+  });
+  const ruler = new ElevationRuler({ projection: cam, model, originDistance: 70 });
+  const { vertical, grade } = ruler.foundationRungs();
+
+  const spacingOf = (rungs) => {
+    const sorted = [...rungs].sort((a, b) => a.Y - b.Y);
+    const gaps = [];
+    for (let i = 1; i < sorted.length; i++) gaps.push(Math.abs(sorted[i].Y - sorted[i - 1].Y));
+    return gaps;
+  };
+  const vGaps = spacingOf(vertical);
+  const gGaps = spacingOf(grade);
+  ok('wall rungs step by one course', vGaps.every((g) => Math.abs(g - 5.5 * IN) < 1e-6), vGaps.join(','));
+  ok('grade rungs step by one riser', gGaps.every((g) => Math.abs(g - 7.5 * IN) < 1e-6), gGaps.join(','));
+  // The snapping must not accumulate: each level is rounded from k*inc, never
+  // from the one before it, so the top of a 17-course wall is still exact.
+  const top = [...vertical].sort((a, b) => a.Y - b.Y).at(-1).level;
+  ok('a tall stack of courses does not drift',
+     Math.abs(top.offset - top.index * 5.5 * IN) < 1e-6,
+     `${top.index} courses -> ${top.offset}`);
+  ok('the wall half counts courses', vertical.every((r) => r.level.noun === 'course'));
+  ok('the grade half counts steps', grade.every((r) => r.level.noun === 'step'));
+
+  // A staff is all vertical and a grade staircase is all projected, so each
+  // must take the scale that matches what it measures.
+  const staff = ruler.staffRungs(70);
+  ok('a levelling staff uses the vertical scale', staff.every((r) => r.level.noun === 'course'));
+  const slope = ruler.slopeRungs();
+  ok('a grade staircase uses the projected scale', slope.every((r) => r.level.noun === 'step'));
+});
+
 group('Guard rails', () => {
   const bad = calibrate({
     ...IMAGE,
