@@ -133,6 +133,20 @@ and leaving it on the wall pin reads it too low.
   Repeatability is not accuracy: five shots at a mis-placed pin will agree
   beautifully and all be wrong.
 
+### Where the tilt works
+
+Motion sensors need two things, and both are silent when missing: an **https**
+page, and one that is **not embedded in someone else's**. A browser delegates
+motion to an iframe only when the embedder asks for it, and most do not — so in
+an embedded page the permission prompt never appears and no events ever arrive.
+
+The app checks for both up front and says which is missing, rather than leaving
+a button that does nothing. Typed angles work everywhere, so an embedded copy is
+still fully usable for the maths — it just cannot read the iPad.
+
+To shoot with the iPad, open the app at its own https address: GitHub Pages off
+this repo, or any static host.
+
 ### Why a plan and not a live map
 
 Map tiles are images from a third-party host, and some hosts block those

@@ -4993,14 +4993,36 @@ class TiltSensor {
   }
 
   /**
+   * Why the tilt cannot be read here, or null when it can be tried.
+   *
+   * Both of these are silent otherwise: an embedded page never sees a prompt
+   * and simply gets no events, and an insecure origin has the API present but
+   * permanently refusing. Saying which it is turns "the button does nothing"
+   * into something the user can act on.
+   */
+  get blockedReason() {
+    if (!this.available) {
+      return 'This device does not report its tilt. Type the angles instead.';
+    }
+    if (typeof window !== 'undefined' && !window.isSecureContext) {
+      return 'Motion sensors need https. Open the app at an https address, or type the angles.';
+    }
+    // Motion is only delegated to an embedded page when the embedder asks for
+    // it, which most do not — including a published artifact.
+    if (typeof window !== 'undefined' && window.top !== window.self) {
+      return 'Motion is blocked inside an embedded page. Open the app at its own address to shoot with the iPad, or type the angles here.';
+    }
+    return null;
+  }
+
+  /**
    * Ask for access and begin listening. Must be called from a user gesture on
    * iOS, or the request is rejected without ever prompting.
    * @returns {Promise<{ok:boolean, reason?:string}>}
    */
   async start() {
-    if (!this.available) {
-      return { ok: false, reason: 'This device does not report its tilt. Enter angles by hand.' };
-    }
+    const blocked = this.blockedReason;
+    if (blocked) return { ok: false, reason: blocked };
     if (this.needsPermission && !this.granted) {
       try {
         const result = await DeviceOrientationEvent.requestPermission();
@@ -5664,6 +5686,14 @@ class App {
     scaleField.onblur = commitScale;
 
     $('btn-tilt').onclick = () => this._startTilt();
+    // Say up front when tilt cannot work here, so the typed-angle path is
+    // presented as the way to use it rather than as a consolation.
+    const blocked = this.tilt.blockedReason;
+    if (blocked) {
+      $('tilt-hint').textContent = blocked;
+      $('btn-tilt').disabled = true;
+      $('tilt-readout').textContent = 'type angles';
+    }
     $('btn-apply-survey').onclick = () => this._applySurvey();
 
     $('in-inst-mode').onchange = (e) => {

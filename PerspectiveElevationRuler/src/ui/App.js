@@ -400,6 +400,14 @@ export class App {
     scaleField.onblur = commitScale;
 
     $('btn-tilt').onclick = () => this._startTilt();
+    // Say up front when tilt cannot work here, so the typed-angle path is
+    // presented as the way to use it rather than as a consolation.
+    const blocked = this.tilt.blockedReason;
+    if (blocked) {
+      $('tilt-hint').textContent = blocked;
+      $('btn-tilt').disabled = true;
+      $('tilt-readout').textContent = 'type angles';
+    }
     $('btn-apply-survey').onclick = () => this._applySurvey();
 
     $('in-inst-mode').onchange = (e) => {
