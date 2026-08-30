@@ -1,0 +1,4370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0b1016">
+<meta name="description" content="A line-of-sight vertical perspective elevation ruler for landscape photographs.">
+<title>Perspective Elevation Ruler</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=&apos;http://www.w3.org/2000/svg&apos; viewBox=&apos;0 0 32 32&apos;%3E%3Crect width=&apos;32&apos; height=&apos;32&apos; rx=&apos;7&apos; fill=&apos;%23111a24&apos;/%3E%3Cg stroke-linecap=&apos;round&apos;%3E%3Cpath d=&apos;M12 9h9&apos; stroke=&apos;%238fe9ff&apos; stroke-width=&apos;1.6&apos;/%3E%3Cpath d=&apos;M9.5 14h13&apos; stroke=&apos;%238fe9ff&apos; stroke-width=&apos;1.8&apos;/%3E%3Cpath d=&apos;M7 19h17&apos; stroke=&apos;%23ffffff&apos; stroke-width=&apos;2&apos;/%3E%3Cpath d=&apos;M4.5 24.5h23&apos; stroke=&apos;%233ddc84&apos; stroke-width=&apos;2.6&apos;/%3E%3C/g%3E%3C/svg%3E">
+<style>
+/* Perspective Elevation Ruler — iPad-first layout.
+   Landscape: photograph left, controls in a fixed right column.
+   Portrait / narrow: controls become a bottom sheet over the photograph. */
+
+:root {
+  --bg: #070b10;
+  --panel: #0e151d;
+  --panel-2: #131c26;
+  --line: #24313f;
+  --text: #e8eef5;
+  --dim: #93a4b6;
+  --accent: #8fe9ff;
+  --origin: #3ddc84;
+  --known: #ffa726;
+  --measure: #ff5cae;
+  --sight: #ffb300;
+  --danger: #ff6b6b;
+  --radius: 12px;
+  --tap: 44px;
+  --panel-w: 348px;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+.app {
+  display: flex;
+  height: 100%;
+  width: 100%;
+}
+
+/* ---------------------------------------------------------------- stage */
+
+.stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  background:
+    radial-gradient(120% 90% at 50% 0%, #131c26 0%, #070b10 70%);
+  overflow: hidden;
+}
+
+#photo-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+/* ------------------------------------------------------------ empty state */
+
+.empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: max(24px, env(safe-area-inset-top)) 24px 24px;
+  text-align: center;
+}
+.empty[hidden] { display: none; }
+.empty-inner { max-width: 460px; }
+.empty h1 {
+  font-size: clamp(24px, 3.4vw, 34px);
+  margin: 22px 0 10px;
+  letter-spacing: -0.02em;
+}
+.empty p { color: var(--dim); margin: 0 0 22px; }
+.empty .fine { font-size: 12px; margin-top: 22px; color: #64748b; }
+.empty-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+
+/* A little perspective ruler as the empty-state mark. */
+.empty-rule {
+  display: grid;
+  gap: 7px;
+  justify-items: center;
+  margin: 0 auto;
+  width: 220px;
+}
+.empty-rule span {
+  display: block;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  border-radius: 2px;
+}
+.empty-rule span:nth-child(1) { width: 36%; opacity: 0.35; }
+.empty-rule span:nth-child(2) { width: 52%; opacity: 0.5; }
+.empty-rule span:nth-child(3) { width: 68%; opacity: 0.68; }
+.empty-rule span:nth-child(4) { width: 84%; opacity: 0.84; }
+.empty-rule span:nth-child(5) { width: 100%; background: linear-gradient(90deg, transparent, var(--origin), transparent); }
+
+/* -------------------------------------------------------------------- hud */
+
+.hud {
+  position: absolute;
+  background: rgba(9, 14, 20, 0.82);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  pointer-events: none;
+}
+.hud[hidden] { display: none; }
+
+.hud-top {
+  top: max(12px, env(safe-area-inset-top));
+  left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(600px, calc(100% - 130px));
+}
+.hud-step {
+  font: 700 11px/1 ui-monospace, "SF Mono", Menlo, monospace;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+  background: rgba(143, 233, 255, 0.12);
+  border: 1px solid rgba(143, 233, 255, 0.3);
+  padding: 5px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+.hud-text { font-size: 14px; }
+.hud-text strong { color: var(--accent); }
+.hud-skip {
+  pointer-events: auto;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+  min-height: 32px;
+}
+
+.hud-readout {
+  left: 12px;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  min-width: 190px;
+}
+.readout-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: baseline;
+}
+.readout-key { color: var(--dim); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+.readout-value { font: 700 19px/1.5 ui-monospace, "SF Mono", Menlo, monospace; }
+.readout-tag {
+  margin-top: 6px;
+  font: 700 10px/1 ui-monospace, Menlo, monospace;
+  letter-spacing: 0.12em;
+  color: var(--measure);
+}
+.readout-tag.measured { color: var(--origin); }
+
+.plane-note {
+  position: absolute;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  color: var(--dim);
+  background: rgba(9, 14, 20, 0.8);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 16px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.plane-note[hidden] { display: none; }
+.plane-note strong { color: var(--sight); }
+
+/* ------------------------------------------------------------------ zoom */
+
+.zoom-cluster {
+  position: absolute;
+  right: 12px;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  display: grid;
+  gap: 8px;
+}
+.zoom-cluster[hidden] { display: none; }
+.zoom-btn {
+  width: var(--tap);
+  height: var(--tap);
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(14, 21, 29, 0.86);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: var(--text);
+  font-size: 19px;
+}
+.zoom-btn:active { background: var(--panel-2); }
+
+.drawer-toggle {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  right: 12px;
+  min-height: var(--tap);
+  padding: 0 16px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(14, 21, 29, 0.86);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: var(--text);
+  font-size: 14px;
+  display: none;
+}
+
+/* ----------------------------------------------------------------- panel */
+
+.panel {
+  flex: 0 0 var(--panel-w);
+  width: var(--panel-w);
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: max(14px, env(safe-area-inset-top)) 16px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.panel-title { display: flex; align-items: center; gap: 11px; }
+.panel-title strong { display: block; font-size: 14px; letter-spacing: -0.01em; }
+.panel-title em { display: block; font-style: normal; font-size: 11px; color: var(--dim); }
+.mark {
+  width: 26px; height: 26px; border-radius: 7px; flex: none;
+  background:
+    linear-gradient(transparent 0 4px, var(--accent) 4px 5px, transparent 5px 10px),
+    linear-gradient(transparent 0 10px, var(--accent) 10px 11px, transparent 11px 16px),
+    linear-gradient(transparent 0 16px, var(--origin) 16px 18px, transparent 18px 26px),
+    var(--panel-2);
+  border: 1px solid var(--line);
+}
+.panel-close {
+  display: none;
+  width: 34px; height: 34px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--dim);
+  font-size: 14px;
+}
+
+.panel-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 12px;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.panel-foot {
+  border-top: 1px solid var(--line);
+  padding: 10px 12px max(10px, env(safe-area-inset-bottom));
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  background: var(--panel);
+}
+
+/* ----------------------------------------------------------------- cards */
+
+.card {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 13px;
+  display: grid;
+  gap: 11px;
+}
+.card.card-quiet { background: transparent; }
+.card h2 {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--dim);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.card h2 i {
+  font-style: normal;
+  width: 20px; height: 20px;
+  display: grid; place-items: center;
+  border-radius: 6px;
+  background: rgba(143, 233, 255, 0.13);
+  border: 1px solid rgba(143, 233, 255, 0.28);
+  color: var(--accent);
+  font-size: 11px; font-weight: 700;
+}
+.card.is-active { border-color: rgba(143, 233, 255, 0.45); }
+
+.hint { margin: 0; font-size: 12px; color: var(--dim); line-height: 1.5; }
+.hint strong { color: var(--text); font-weight: 600; }
+.warn {
+  margin: 0;
+  font-size: 12px;
+  color: #ffd7a8;
+  background: rgba(255, 167, 38, 0.11);
+  border: 1px solid rgba(255, 167, 38, 0.3);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.warn[hidden] { display: none; }
+
+/* --------------------------------------------------------------- fields */
+
+.field { display: grid; gap: 6px; }
+.field > span {
+  font-size: 12px;
+  color: var(--dim);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.field > span em {
+  font-style: normal;
+  color: var(--text);
+  font: 700 13px/1 ui-monospace, "SF Mono", Menlo, monospace;
+}
+.field small { font-size: 11px; color: #64748b; line-height: 1.4; }
+
+input[type="text"], select {
+  width: 100%;
+  min-height: var(--tap);
+  padding: 0 12px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: #0a1017;
+  color: var(--text);
+  font: 600 16px/1 ui-monospace, "SF Mono", Menlo, monospace;
+  appearance: none;
+  -webkit-appearance: none;
+}
+select {
+  font-family: inherit;
+  font-size: 14px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--dim) 50%),
+                    linear-gradient(135deg, var(--dim) 50%, transparent 50%);
+  background-position: calc(100% - 17px) 50%, calc(100% - 12px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 32px;
+}
+input[type="text"]:focus, select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(143, 233, 255, 0.14);
+}
+
+input[type="range"] {
+  width: 100%;
+  height: 30px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  margin: 0;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: #223040;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 26px; height: 26px;
+  margin-top: -11px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 3px solid #0a1017;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+}
+input[type="range"]::-moz-range-track { height: 4px; border-radius: 2px; background: #223040; }
+input[type="range"]::-moz-range-thumb {
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--accent); border: 3px solid #0a1017;
+}
+
+.toggles { display: grid; gap: 2px; }
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.toggle input {
+  width: 40px; height: 24px;
+  appearance: none; -webkit-appearance: none;
+  background: #223040;
+  border-radius: 999px;
+  position: relative;
+  flex: none;
+  transition: background 0.15s;
+}
+.toggle input::after {
+  content: "";
+  position: absolute;
+  top: 3px; left: 3px;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: #7d8ea1;
+  transition: transform 0.15s, background 0.15s;
+}
+.toggle input:checked { background: rgba(143, 233, 255, 0.32); }
+.toggle input:checked::after { transform: translateX(16px); background: var(--accent); }
+
+/* ----------------------------------------------------- reference blocks */
+
+.ref {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 11px;
+  display: grid;
+  gap: 9px;
+  background: #0a1017;
+}
+.ref.is-set { border-color: rgba(61, 220, 132, 0.34); }
+.ref-head { display: flex; align-items: center; gap: 9px; }
+.ref-name { flex: 1; font-size: 13px; font-weight: 600; }
+.dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.dot-origin { background: var(--origin); box-shadow: 0 0 0 3px rgba(61, 220, 132, 0.18); }
+.dot-known { background: var(--known); box-shadow: 0 0 0 3px rgba(255, 167, 38, 0.18); }
+
+.derived {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  font-size: 12px;
+  padding: 10px 11px;
+  border-radius: 9px;
+  background: #0a1017;
+  border: 1px solid var(--line);
+}
+.derived span { color: var(--dim); }
+.derived strong { font: 700 13px/1.35 ui-monospace, "SF Mono", Menlo, monospace; text-align: right; }
+
+/* ----------------------------------------------------------- point list */
+
+.point-list { display: grid; gap: 6px; }
+.point-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: #0a1017;
+  min-height: var(--tap);
+  cursor: pointer;
+}
+.point-row.is-selected { border-color: var(--measure); background: rgba(255, 92, 174, 0.08); }
+.point-row .swatch { width: 9px; height: 9px; border-radius: 50%; background: var(--measure); flex: none; }
+.point-row .pt-name { flex: 1; font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.point-row .pt-val { font: 700 13px/1 ui-monospace, Menlo, monospace; }
+.point-row .pt-del {
+  border: none; background: transparent; color: var(--dim);
+  font-size: 16px; width: 28px; height: 28px; border-radius: 6px; flex: none;
+}
+.point-row .pt-del:active { background: rgba(255, 107, 107, 0.16); color: var(--danger); }
+.empty-list { padding: 4px 0; }
+
+/* --------------------------------------------------------------- buttons */
+
+.btn {
+  min-height: var(--tap);
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  font: 600 14px/1 -apple-system, system-ui, sans-serif;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.btn:active { background: #1b2733; }
+.btn:disabled { opacity: 0.4; cursor: default; }
+.btn-tiny { min-height: 36px; font-size: 12.5px; padding: 0 10px; }
+.btn-primary { background: rgba(143, 233, 255, 0.16); border-color: rgba(143, 233, 255, 0.45); color: var(--accent); }
+.btn-accent { background: rgba(61, 220, 132, 0.15); border-color: rgba(61, 220, 132, 0.45); color: var(--origin); }
+.btn-danger { color: #ffb4b4; border-color: rgba(255, 107, 107, 0.3); }
+.btn.is-armed {
+  background: rgba(255, 179, 0, 0.18);
+  border-color: var(--sight);
+  color: #ffd88a;
+}
+
+.row { display: grid; gap: 8px; }
+.row-2 { grid-template-columns: 1fr 1fr; }
+
+/* ---------------------------------------------------------------- toast */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: max(28px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  background: rgba(14, 21, 29, 0.96);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 11px 20px;
+  font-size: 14px;
+  z-index: 50;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  max-width: min(520px, 90vw);
+  text-align: center;
+}
+.toast[hidden] { display: none; }
+.toast.is-error { border-color: rgba(255, 107, 107, 0.5); color: #ffc9c9; }
+
+/* ------------------------------------------------------- narrow layouts */
+
+@media (max-width: 900px), (orientation: portrait) and (max-width: 1100px) {
+  .drawer-toggle { display: block; }
+  .panel-close { display: block; }
+
+  .panel {
+    position: fixed;
+    inset: auto 0 0 0;
+    width: 100%;
+    max-height: 76vh;
+    border-left: none;
+    border-top: 1px solid var(--line);
+    border-radius: 18px 18px 0 0;
+    transform: translateY(100%);
+    transition: transform 0.24s ease;
+    z-index: 40;
+    box-shadow: 0 -14px 40px rgba(0, 0, 0, 0.55);
+  }
+  .app.drawer-open .panel { transform: translateY(0); }
+  .app.drawer-open .drawer-toggle { opacity: 0; pointer-events: none; }
+  .panel-head { padding-top: 14px; }
+  .plane-note { display: none; }
+}
+
+@media (max-width: 460px) {
+  .panel-foot { grid-template-columns: 1fr 1fr; }
+  .hud-top { max-width: calc(100% - 24px); }
+}
+
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+
+  <!-- ------------------------------------------------------------------ -->
+  <!-- Working canvas                                                      -->
+  <!-- ------------------------------------------------------------------ -->
+  <main class="stage" id="stage">
+    <canvas id="photo-canvas"></canvas>
+
+    <div class="empty" id="empty-state">
+      <div class="empty-inner">
+        <div class="empty-rule" aria-hidden="true">
+          <span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <h1>Perspective Elevation Ruler</h1>
+        <p>
+          Photograph a slope, mark two points you know, and read elevations off the
+          picture along one line of sight.
+        </p>
+        <div class="empty-actions">
+          <button class="btn btn-primary" id="empty-take">Take Photograph</button>
+          <button class="btn" id="empty-choose">Choose Photograph</button>
+        </div>
+        <p class="fine">Visual estimating tool — not a survey instrument.</p>
+      </div>
+    </div>
+
+    <!-- Step guidance, floats over the picture -->
+    <div class="hud hud-top" id="hud" hidden>
+      <div class="hud-step" id="hud-step">STEP 2</div>
+      <div class="hud-text" id="hud-text">Tap the origin.</div>
+      <button class="hud-skip" id="hud-next" hidden>Done</button>
+    </div>
+
+    <!-- Live readout for the selected / last placed point -->
+    <div class="hud hud-readout" id="readout" hidden>
+      <div class="readout-row">
+        <span class="readout-key">Elevation</span>
+        <span class="readout-value" id="readout-elev">—</span>
+      </div>
+      <div class="readout-row">
+        <span class="readout-key">Change</span>
+        <span class="readout-value" id="readout-change">—</span>
+      </div>
+      <div class="readout-row">
+        <span class="readout-key">Distance</span>
+        <span class="readout-value" id="readout-dist">—</span>
+      </div>
+      <div class="readout-tag" id="readout-tag">PROJECTED</div>
+    </div>
+
+    <div class="plane-note" id="plane-note" hidden>
+      Valid along the <strong>line of sight</strong> only — not across the photograph.
+    </div>
+
+    <div class="zoom-cluster" id="zoom-cluster" hidden>
+      <button class="zoom-btn" id="zoom-in" aria-label="Zoom in">+</button>
+      <button class="zoom-btn" id="zoom-out" aria-label="Zoom out">−</button>
+      <button class="zoom-btn" id="zoom-fit" aria-label="Fit photograph">⤢</button>
+    </div>
+
+    <button class="drawer-toggle" id="drawer-toggle" aria-label="Show controls">Controls</button>
+  </main>
+
+  <!-- ------------------------------------------------------------------ -->
+  <!-- Control panel                                                       -->
+  <!-- ------------------------------------------------------------------ -->
+  <aside class="panel" id="panel">
+    <header class="panel-head">
+      <div class="panel-title">
+        <span class="mark" aria-hidden="true"></span>
+        <div>
+          <strong>Perspective Elevation Ruler</strong>
+          <em>Line-of-sight vertical plane</em>
+        </div>
+      </div>
+      <button class="panel-close" id="panel-close" aria-label="Hide controls">✕</button>
+    </header>
+
+    <div class="panel-body">
+
+      <!-- STEP 1 — photograph ------------------------------------------- -->
+      <section class="card" data-step="1">
+        <h2><i>1</i> Photograph</h2>
+        <div class="row row-2">
+          <button class="btn" id="btn-take">Take Photo</button>
+          <button class="btn" id="btn-choose">Choose Photo</button>
+        </div>
+        <p class="hint" id="photo-info">No photograph loaded.</p>
+      </section>
+
+      <!-- STEP 2/3 — reference points ------------------------------------ -->
+      <section class="card" data-step="2">
+        <h2><i>2</i> Known Points</h2>
+
+        <div class="ref" id="ref-origin">
+          <div class="ref-head">
+            <span class="dot dot-origin"></span>
+            <span class="ref-name">Origin</span>
+            <button class="btn btn-tiny" id="btn-set-origin">Tap on photo</button>
+          </div>
+          <label class="field">
+            <span>Origin elevation</span>
+            <input type="text" inputmode="decimal" id="in-origin-elev" value="100.00">
+          </label>
+        </div>
+
+        <div class="ref" id="ref-known">
+          <div class="ref-head">
+            <span class="dot dot-known"></span>
+            <span class="ref-name">Point B</span>
+            <button class="btn btn-tiny" id="btn-set-known">Tap on photo</button>
+          </div>
+          <label class="field">
+            <span>Point B elevation</span>
+            <input type="text" inputmode="decimal" id="in-known-elev" value="103.00">
+          </label>
+          <label class="field">
+            <span>Horizontal distance</span>
+            <input type="text" inputmode="decimal" id="in-distance" value="40.00">
+          </label>
+          <p class="hint">Point B must be the <strong>farther</strong> of the two.</p>
+        </div>
+
+        <div class="derived" id="derived-grade">
+          <span>Elevation change</span><strong id="out-delta">+3.00'</strong>
+          <span>Grade</span><strong id="out-grade">7.5%</strong>
+        </div>
+      </section>
+
+      <!-- STEP 4/5 — calibration ---------------------------------------- -->
+      <section class="card" data-step="4">
+        <h2><i>3</i> Calibrate Perspective</h2>
+        <p class="hint">
+          The line of sight runs through both known points. Drag either point on the
+          photo to re-aim it, then fine-tune below until the ruler sits on the ground.
+        </p>
+
+        <label class="field field-slider">
+          <span>Perspective strength <em id="out-fov">60°</em></span>
+          <input type="range" id="in-fov" min="20" max="110" step="1" value="60">
+          <small>Camera field of view. Wider = stronger convergence.</small>
+        </label>
+
+        <label class="field">
+          <span>Fine-tune by</span>
+          <select id="in-solve-mode">
+            <option value="height">Camera height</option>
+            <option value="distance">Line-of-sight distance</option>
+            <option value="pitch">Vanishing point / horizon</option>
+          </select>
+        </label>
+
+        <label class="field field-slider">
+          <span id="lbl-solve">Camera height <em id="out-solve">5.50'</em></span>
+          <input type="range" id="in-solve" min="0" max="100" step="0.1" value="50">
+          <small id="hint-solve">Both known points stay pinned whatever you choose.</small>
+        </label>
+
+        <div class="derived" id="derived-cal">
+          <span>Camera height</span><strong id="out-cam-h">—</strong>
+          <span>Viewing angle</span><strong id="out-pitch">—</strong>
+          <span>Origin distance</span><strong id="out-origin-d">—</strong>
+          <span>Focal length</span><strong id="out-focal">—</strong>
+        </div>
+        <p class="warn" id="cal-warning" hidden></p>
+      </section>
+
+      <!-- Ruler ---------------------------------------------------------- -->
+      <section class="card" data-step="5">
+        <h2><i>4</i> Elevation Ruler</h2>
+
+        <label class="field">
+          <span>Elevation increment</span>
+          <select id="in-increment">
+            <option value="0.1">0.10</option>
+            <option value="0.25">0.25</option>
+            <option value="0.5">0.50</option>
+            <option value="1" selected>1.00</option>
+            <option value="2">2.00</option>
+          </select>
+        </label>
+
+        <label class="field field-slider">
+          <span>Display range <em id="out-range">±10'</em></span>
+          <input type="range" id="in-range" min="1" max="50" step="1" value="10">
+        </label>
+
+        <label class="field">
+          <span>Ruler style</span>
+          <select id="in-style">
+            <option value="slope" selected>Follow the grade (staircase)</option>
+            <option value="staff">Levelling staff at one distance</option>
+            <option value="both">Both</option>
+          </select>
+        </label>
+
+        <label class="field field-slider" id="wrap-rung-width">
+          <span>Ruler width <em id="out-rung-width">10'</em></span>
+          <input type="range" id="in-rung-width" min="1" max="60" step="1" value="10">
+          <small>How far each increment extends either side of the sight line.</small>
+        </label>
+
+        <label class="field field-slider" id="wrap-staff-distance" hidden>
+          <span>Staff distance <em id="out-staff-distance">—</em></span>
+          <input type="range" id="in-staff-distance" min="1" max="100" step="1" value="50">
+        </label>
+
+        <label class="field">
+          <span>Labels show</span>
+          <select id="in-label-mode">
+            <option value="elevation" selected>Elevation (104.00')</option>
+            <option value="change">Change (+4.00')</option>
+          </select>
+        </label>
+      </section>
+
+      <!-- Display -------------------------------------------------------- -->
+      <section class="card">
+        <h2><i>5</i> Display</h2>
+        <label class="field field-slider">
+          <span>Overlay opacity <em id="out-opacity">100%</em></span>
+          <input type="range" id="in-opacity" min="10" max="100" step="1" value="100">
+        </label>
+        <div class="toggles">
+          <label class="toggle"><input type="checkbox" id="tg-ruler" checked><span>Elevation ruler</span></label>
+          <label class="toggle"><input type="checkbox" id="tg-labels" checked><span>Labels</span></label>
+          <label class="toggle"><input type="checkbox" id="tg-sight" checked><span>Line of sight</span></label>
+          <label class="toggle"><input type="checkbox" id="tg-horizon" checked><span>Horizon</span></label>
+          <label class="toggle"><input type="checkbox" id="tg-crosshair"><span>Crosshair</span></label>
+          <label class="toggle"><input type="checkbox" id="tg-distances"><span>Distances</span></label>
+        </div>
+        <label class="field">
+          <span>Units</span>
+          <select id="in-units">
+            <option value="ft" selected>Feet (')</option>
+            <option value="m">Metres (m)</option>
+          </select>
+        </label>
+      </section>
+
+      <!-- Annotations ---------------------------------------------------- -->
+      <section class="card">
+        <h2><i>6</i> Measurements</h2>
+        <p class="hint">
+          Tap <strong>Add Point</strong>, then tap the photo along the line of sight.
+          Drag any point to update its elevation live.
+        </p>
+        <div class="point-list" id="point-list">
+          <p class="hint empty-list">No measurement points yet.</p>
+        </div>
+        <div class="row row-2">
+          <button class="btn btn-tiny" id="btn-dim-vertical" disabled>Vertical dimension</button>
+          <button class="btn btn-tiny" id="btn-dim-grade" disabled>Slope / grade</button>
+        </div>
+        <div class="row row-2">
+          <button class="btn btn-tiny" id="btn-dim-horizontal" disabled>Horizontal distance</button>
+          <button class="btn btn-tiny btn-danger" id="btn-clear-points">Clear points</button>
+        </div>
+        <p class="hint" id="dim-hint">Select two points to draw a dimension between them.</p>
+      </section>
+
+      <section class="card card-quiet">
+        <h2>Accuracy</h2>
+        <p class="hint">
+          <strong>Measured</strong> values are the elevations you entered.
+          <strong>Projected</strong> values are interpolated from the calibration and are
+          estimates only. Elevations apply along the line of sight shown — an elevation
+          line says nothing about the ground to its left or right. This is not a survey
+          instrument. Recalibrate against a known point whenever you can.
+        </p>
+      </section>
+    </div>
+
+    <!-- Actions ---------------------------------------------------------- -->
+    <footer class="panel-foot">
+      <button class="btn btn-primary" id="btn-calibrate">Calibrate</button>
+      <button class="btn" id="btn-add-point">Add Point</button>
+      <button class="btn" id="btn-reset">Reset</button>
+      <button class="btn btn-accent" id="btn-export">Export</button>
+    </footer>
+  </aside>
+</div>
+
+<!-- Hidden file inputs: `capture` opens the iPad camera directly. -->
+<input type="file" id="file-camera" accept="image/*" capture="environment" hidden>
+<input type="file" id="file-library" accept="image/*" hidden>
+
+<div class="toast" id="toast" hidden></div>
+
+<script type="module">
+
+// ======================================================================
+// src/core/Geometry.js
+// ======================================================================
+// Geometry.js
+//
+// Tiny 2D vector helpers plus a few numeric utilities. No DOM, no canvas — this
+// file (and everything else in src/core) is pure mathematics so it can be unit
+// tested under Node and reused by any renderer.
+
+const DEG = Math.PI / 180;
+const RAD = 180 / Math.PI;
+
+const vec = (x, y) => ({ x, y });
+const add = (a, b) => ({ x: a.x + b.x, y: a.y + b.y });
+const sub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y });
+const scale = (a, k) => ({ x: a.x * k, y: a.y * k });
+const dot = (a, b) => a.x * b.x + a.y * b.y;
+const len = (a) => Math.hypot(a.x, a.y);
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+
+function normalize(a, fallback = { x: 0, y: -1 }) {
+  const l = Math.hypot(a.x, a.y);
+  if (!(l > 1e-12)) return { ...fallback };
+  return { x: a.x / l, y: a.y / l };
+}
+
+// Right-hand perpendicular of `d`. With `d` pointing "up" the image
+// (0, -1) this returns (+1, 0), i.e. image-right. See PerspectiveProjection
+// for why that particular handedness matters.
+const perp = (d) => ({ x: -d.y, y: d.x });
+
+const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
+// Signed distance of `p` from the infinite line through `origin` with unit
+// direction `dir`, split into the along-line and across-line components.
+function decompose(p, origin, dir) {
+  const r = sub(p, origin);
+  return { along: dot(r, dir), across: dot(r, perp(dir)) };
+}
+
+// Foot of the perpendicular from `p` onto the infinite line (origin, dir).
+function footOnLine(p, origin, dir) {
+  const t = dot(sub(p, origin), dir);
+  return add(origin, scale(dir, t));
+}
+
+// Shortest distance from `p` to the segment ab (used for hit testing).
+function distToSegment(p, a, b) {
+  const ab = sub(b, a);
+  const l2 = dot(ab, ab);
+  if (l2 < 1e-12) return dist(p, a);
+  const t = clamp(dot(sub(p, a), ab) / l2, 0, 1);
+  return dist(p, add(a, scale(ab, t)));
+}
+
+// Clip a segment against an axis-aligned rectangle (Liang–Barsky). Returns
+// null when the segment misses the rectangle entirely. Used to keep long
+// projected lines (horizon, ground line) inside the photograph.
+function clipSegmentToRect(a, b, rect) {
+  let t0 = 0;
+  let t1 = 1;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const tests = [
+    [-dx, a.x - rect.x],
+    [dx, rect.x + rect.width - a.x],
+    [-dy, a.y - rect.y],
+    [dy, rect.y + rect.height - a.y],
+  ];
+  for (const [p, q] of tests) {
+    if (Math.abs(p) < 1e-12) {
+      if (q < 0) return null;
+      continue;
+    }
+    const r = q / p;
+    if (p < 0) {
+      if (r > t1) return null;
+      if (r > t0) t0 = r;
+    } else {
+      if (r < t0) return null;
+      if (r < t1) t1 = r;
+    }
+  }
+  return {
+    a: { x: a.x + t0 * dx, y: a.y + t0 * dy },
+    b: { x: a.x + t1 * dx, y: a.y + t1 * dy },
+  };
+}
+
+// Bisection root finder. `f` must change sign across [lo, hi].
+function bisect(f, lo, hi, iterations = 80) {
+  let flo = f(lo);
+  let fhi = f(hi);
+  if (!Number.isFinite(flo) || !Number.isFinite(fhi)) return null;
+  if (flo === 0) return lo;
+  if (fhi === 0) return hi;
+  if (flo > 0 === fhi > 0) return null;
+  let a = lo;
+  let b = hi;
+  for (let i = 0; i < iterations; i++) {
+    const m = 0.5 * (a + b);
+    const fm = f(m);
+    if (!Number.isFinite(fm)) return null;
+    if (fm === 0) return m;
+    if (fm > 0 === flo > 0) {
+      a = m;
+      flo = fm;
+    } else {
+      b = m;
+      fhi = fm;
+    }
+  }
+  return 0.5 * (a + b);
+}
+
+// Round to a fixed number of decimals, avoiding "-0.00".
+function round(value, decimals = 2) {
+  const f = 10 ** decimals;
+  const r = Math.round(value * f) / f;
+  return r === 0 ? 0 : r;
+}
+
+
+// ======================================================================
+// src/core/PerspectiveProjection.js
+// ======================================================================
+// PerspectiveProjection.js
+//
+// The camera model. Pure maths — it knows about a photograph only as a width
+// and a height in pixels, and never touches the DOM.
+//
+// ---------------------------------------------------------------------------
+// WORLD COORDINATES
+// ---------------------------------------------------------------------------
+//
+//   X = horizontal, across the line of sight (positive = image-right)
+//   Y = elevation, relative to the origin's elevation (positive = up)
+//   Z = horizontal distance from the camera, along the line of sight
+//
+// The camera sits at (0, cameraHeight, 0) and looks along +Z, tilted down by
+// `pitch`. Because a real camera looking along a line of sight necessarily lies
+// *in* the vertical plane containing that line of sight, the measurement plane
+// is exactly the plane X = 0.
+//
+// That is the key simplification of this whole app: a plane that passes through
+// the camera centre projects to a straight LINE in the image. So the vertical
+// measurement plane appears in the photograph as the single "line of sight"
+// line the user places in step 4, and every point of the ruler lands on it.
+//
+// ---------------------------------------------------------------------------
+// IMAGE COORDINATES
+// ---------------------------------------------------------------------------
+//
+// Rather than assume the photograph is level, we build an image-space frame
+// from the user's line of sight:
+//
+//   d  unit vector along the line of sight, pointing away from the camera
+//      (towards the horizon). Increasing distance always moves this way.
+//   n  = perp(d), the image direction that world +X projects onto.
+//   P0 the principal point: the foot of the perpendicular from the image
+//      centre onto the line of sight. The optical axis of a camera inside the
+//      measurement plane must lie on that line; where exactly it sits along the
+//      line is a gauge freedom absorbed by `pitch`, so the closest point to the
+//      image centre is both legal and the least surprising choice.
+//
+// A world point therefore lands at  P0 + t*d + s*n  with t and s from the usual
+// pinhole division. `d` doubles as the image-space "up towards the horizon"
+// axis, which is what lets the same code work on rolled/tilted photographs.
+
+
+class PerspectiveProjection {
+  /**
+   * @param {object} p
+   * @param {number} p.imageWidth   photograph width in pixels
+   * @param {number} p.imageHeight  photograph height in pixels
+   * @param {number} p.fovDeg       horizontal field of view ("perspective strength")
+   * @param {number} p.pitchRad     camera tilt, positive = aimed below horizontal
+   * @param {number} p.cameraHeight camera height above the origin's elevation
+   * @param {{x,y}}  p.losA         image point on the line of sight (the origin)
+   * @param {{x,y}}  p.losB         a second image point, FARTHER from the camera
+   */
+  constructor({ imageWidth, imageHeight, fovDeg, pitchRad, cameraHeight, losA, losB }) {
+    this.imageWidth = imageWidth;
+    this.imageHeight = imageHeight;
+    this.fovDeg = fovDeg;
+    this.pitchRad = pitchRad;
+    this.cameraHeight = cameraHeight;
+    this.losA = { ...losA };
+    this.losB = { ...losB };
+
+    // Focal length in pixels from the horizontal field of view.
+    this.focalPx = imageWidth / 2 / Math.tan((fovDeg * DEG) / 2);
+
+    // Image-space frame. `d` points from the near reference point towards the
+    // far one, which is always the "away from the camera" direction.
+    this.d = normalize(sub(this.losB, this.losA));
+    this.n = perp(this.d);
+
+    // Principal point: the point of the line of sight closest to the image
+    // centre.
+    const centre = { x: imageWidth / 2, y: imageHeight / 2 };
+    this.P0 = add(this.losA, scale(this.d, dot(sub(centre, this.losA), this.d)));
+
+    this._sinP = Math.sin(pitchRad);
+    this._cosP = Math.cos(pitchRad);
+  }
+
+  // --- forward projection -------------------------------------------------
+
+  /**
+   * Project a world point onto the photograph.
+   * @returns {{x:number,y:number,depth:number}|null} null if behind the camera.
+   */
+  project(X, Y, Z) {
+    const dy = Y - this.cameraHeight;
+    // Camera basis: forward = (0, -sin, cos), up = (0, cos, sin), right = X.
+    const yc = dy * this._cosP + Z * this._sinP;
+    const zc = -dy * this._sinP + Z * this._cosP;
+    if (!(zc > 1e-6)) return null;
+    const t = (this.focalPx * yc) / zc;
+    const s = (this.focalPx * X) / zc;
+    return {
+      x: this.P0.x + t * this.d.x + s * this.n.x,
+      y: this.P0.y + t * this.d.y + s * this.n.y,
+      depth: zc,
+    };
+  }
+
+  /** Project a point that lies in the measurement plane (X = 0). */
+  projectPlane(Y, Z) {
+    return this.project(0, Y, Z);
+  }
+
+  // --- image space <-> ray ------------------------------------------------
+
+  /**
+   * Split an image point into its along-the-line-of-sight coordinate `t` and
+   * its perpendicular offset `across`. Any point with a non-zero `across` is
+   * off the measurement plane; the app reports that to the user rather than
+   * silently pretending the tap was on the plane.
+   */
+  toLineCoords(p) {
+    const r = sub(p, this.P0);
+    return { t: dot(r, this.d), across: dot(r, this.n) };
+  }
+
+  /** Image point for a coordinate along the line of sight. */
+  fromLineCoords(t, across = 0) {
+    return add(this.P0, add(scale(this.d, t), scale(this.n, across)));
+  }
+
+  /** Angle of a line-of-sight coordinate above the optical axis. */
+  alphaFor(t) {
+    return Math.atan2(t, this.focalPx);
+  }
+
+  /**
+   * Depression angle below horizontal of the view ray through `t`.
+   * Positive = the ray heads downwards.
+   */
+  depressionFor(t) {
+    return this.pitchRad - this.alphaFor(t);
+  }
+
+  /**
+   * Intersect the view ray through image coordinate `t` with a straight ground
+   * line running along the measurement plane. The ground line is defined by the
+   * calibration: elevation 0 at distance `originDistance`, rising with `slope`
+   * (rise over run).
+   * @returns {{Y:number,Z:number}|null}
+   */
+  intersectGround(t, slope, originDistance) {
+    const tanB = Math.tan(this.depressionFor(t));
+    if (!Number.isFinite(tanB)) return null;
+    const den = slope + tanB;
+    if (Math.abs(den) < 1e-9) return null; // ray parallel to the ground line
+    const Z = (this.cameraHeight + slope * originDistance) / den;
+    if (!(Z > 1e-6) || !Number.isFinite(Z)) return null;
+    return { Z, Y: slope * (Z - originDistance) };
+  }
+
+  /**
+   * Elevation of the view ray through `t` at a known distance `Z`. Used when
+   * the user measures against a vertical staff instead of the ground.
+   */
+  elevationAtDepth(t, Z) {
+    if (!(Z > 1e-6)) return null;
+    const tanB = Math.tan(this.depressionFor(t));
+    if (!Number.isFinite(tanB)) return null;
+    return { Z, Y: this.cameraHeight - Z * tanB };
+  }
+
+  /**
+   * Distance along the line of sight at which the measurement plane reaches
+   * elevation `Y` on the ray through `t`. Inverse of the above.
+   */
+  depthForElevation(t, Y) {
+    const tanB = Math.tan(this.depressionFor(t));
+    if (!Number.isFinite(tanB) || Math.abs(tanB) < 1e-9) return null;
+    const Z = (this.cameraHeight - Y) / tanB;
+    return Z > 1e-6 ? Z : null;
+  }
+
+  // --- horizon / vanishing point -----------------------------------------
+
+  /** Line-of-sight coordinate of the horizon (points at infinite distance). */
+  get horizonT() {
+    return this.focalPx * Math.tan(this.pitchRad);
+  }
+
+  /** The vanishing point of the line of sight, in image pixels. */
+  get vanishingPoint() {
+    return this.fromLineCoords(this.horizonT);
+  }
+
+  /**
+   * The horizon as a segment clipped to the photograph. Every horizontal world
+   * plane vanishes on this line, so it runs perpendicular to `d`.
+   */
+  horizonSegment(margin = 0) {
+    const vp = this.vanishingPoint;
+    const span = (this.imageWidth + this.imageHeight) * 2;
+    const a = add(vp, scale(this.n, -span));
+    const b = add(vp, scale(this.n, span));
+    return clipSegmentToRect(a, b, {
+      x: -margin,
+      y: -margin,
+      width: this.imageWidth + margin * 2,
+      height: this.imageHeight + margin * 2,
+    });
+  }
+
+  /** True when the whole model is finite and usable. */
+  get isFinite() {
+    return (
+      Number.isFinite(this.focalPx) &&
+      Number.isFinite(this.pitchRad) &&
+      Number.isFinite(this.cameraHeight) &&
+      Number.isFinite(this.P0.x) &&
+      Number.isFinite(this.P0.y)
+    );
+  }
+}
+
+
+// ======================================================================
+// src/core/PerspectiveCalibration.js
+// ======================================================================
+// PerspectiveCalibration.js
+//
+// Turns the four things the user actually knows —
+//
+//   * where the origin is in the photograph,
+//   * where a second known point is in the photograph,
+//   * the elevation difference between them,
+//   * the horizontal distance between them,
+//
+// — into a camera (pitch, height, distance to the origin) whose projection puts
+// those two points back exactly where the user tapped them.
+//
+// ---------------------------------------------------------------------------
+// THE SOLVE
+// ---------------------------------------------------------------------------
+//
+// Both reference points lie in the measurement plane, which projects to the
+// line of sight. So each one contributes a single number: its coordinate `t`
+// along that line, i.e. an angle above the optical axis
+//
+//     alpha = atan(t / focalPx)
+//
+// With the camera pitched down by `theta`, the ray to a point makes a
+// depression angle below horizontal of
+//
+//     beta = theta - alpha
+//
+// and simple trigonometry from the camera at height h gives
+//
+//     tan(beta_A) = (h - 0) / Z_A            (the origin, elevation 0)
+//     tan(beta_B) = (h - dY) / (Z_A + D)     (the known point)
+//
+// Two equations. Three unknowns (theta, h, Z_A) — genuinely one short, which is
+// why the app offers a fine-tune control rather than pretending it can solve
+// everything. Fixing any ONE of the three closes the system.
+//
+// Fixing `theta` is the nicest case because it is linear:
+//
+//     h * cot(beta_A) + D = (h - dY) * cot(beta_B)
+//  => h = (-dY * cot(beta_B) - D) / (cot(beta_A) - cot(beta_B))
+//
+// So `solveFromPitch` is closed form, and the other two modes ("I know roughly
+// how high the camera was" / "I know roughly how far away the origin is") are
+// found by root-finding on pitch over that same closed form. Every mode keeps
+// both reference points pinned to the pixels the user tapped.
+
+
+
+/** Guard band keeping the solver away from the tan() poles. */
+const EPS = 1e-4;
+
+/**
+ * Everything the solver needs that does not depend on the camera, derived once
+ * per calibration attempt.
+ */
+function calibrationContext({
+  imageWidth,
+  imageHeight,
+  fovDeg,
+  originPoint,
+  knownPoint,
+  deltaElevation,
+  horizontalDistance,
+}) {
+  const focalPx = imageWidth / 2 / Math.tan((fovDeg * DEG) / 2);
+  const d = normalize(sub(knownPoint, originPoint));
+  const n = perp(d);
+  const centre = { x: imageWidth / 2, y: imageHeight / 2 };
+  const P0 = add(originPoint, scale(d, dot(sub(centre, originPoint), d)));
+  const tA = dot(sub(originPoint, P0), d);
+  const tB = dot(sub(knownPoint, P0), d);
+  return {
+    imageWidth,
+    imageHeight,
+    fovDeg,
+    focalPx,
+    d,
+    n,
+    P0,
+    tA,
+    tB,
+    alphaA: Math.atan2(tA, focalPx),
+    alphaB: Math.atan2(tB, focalPx),
+    deltaElevation,
+    horizontalDistance,
+    originPoint: { ...originPoint },
+    knownPoint: { ...knownPoint },
+  };
+}
+
+/**
+ * Closed-form camera for a given pitch.
+ * @returns {{pitchRad,cameraHeight,originDistance,knownDistance}|null}
+ */
+function solveFromPitch(pitchRad, ctx) {
+  const { alphaA, alphaB, deltaElevation: dY, horizontalDistance: D } = ctx;
+  const betaA = pitchRad - alphaA;
+  const betaB = pitchRad - alphaB;
+  const tanA = Math.tan(betaA);
+  const tanB = Math.tan(betaB);
+  if (!Number.isFinite(tanA) || !Number.isFinite(tanB)) return null;
+  if (Math.abs(tanA) < EPS || Math.abs(tanB) < EPS) return null; // ray at the horizon
+  const cotA = 1 / tanA;
+  const cotB = 1 / tanB;
+  const den = cotA - cotB;
+  if (!Number.isFinite(den) || Math.abs(den) < 1e-9) return null;
+
+  const h = (-dY * cotB - D) / den;
+  const zA = h * cotA;
+  const zB = (h - dY) * cotB;
+  if (![h, zA, zB].every(Number.isFinite)) return null;
+  // Both reference points must be in front of the camera, and the far one must
+  // really be farther — otherwise the solution is a mirror-image artefact.
+  if (!(zA > 1e-6) || !(zB > 1e-6)) return null;
+  if (Math.abs(zB - (zA + D)) > 1e-6 * Math.max(1, Math.abs(zB))) return null;
+  return { pitchRad, cameraHeight: h, originDistance: zA, knownDistance: zB };
+}
+
+/** The open interval of pitches for which a solution can exist. */
+function pitchDomain(ctx) {
+  // beta_A must be a real depression angle strictly inside (-90, 90) degrees,
+  // and the same for beta_B.
+  const lo = Math.max(ctx.alphaA, ctx.alphaB) - Math.PI / 2 + EPS;
+  const hi = Math.min(ctx.alphaA, ctx.alphaB) + Math.PI / 2 - EPS;
+  return { lo, hi };
+}
+
+/**
+ * Sample the pitch domain, keeping only pitches that yield a valid camera.
+ * Returns runs of consecutive valid samples so callers can root-find inside a
+ * single continuous branch instead of jumping across a pole.
+ */
+function validRuns(ctx, samples = 1400) {
+  const { lo, hi } = pitchDomain(ctx);
+  if (!(hi > lo)) return [];
+  const runs = [];
+  let current = null;
+  for (let i = 0; i <= samples; i++) {
+    const theta = lo + ((hi - lo) * i) / samples;
+    const sol = solveFromPitch(theta, ctx);
+    if (sol) {
+      if (!current) {
+        current = [];
+        runs.push(current);
+      }
+      current.push({ theta, sol });
+    } else {
+      current = null;
+    }
+  }
+  return runs;
+}
+
+/**
+ * Root-find pitch so that `valueOf(solution)` equals `target`.
+ * Searches every continuous branch and returns the closest match.
+ */
+function solveForValue(ctx, valueOf, target) {
+  let best = null;
+  for (const run of validRuns(ctx)) {
+    for (let i = 1; i < run.length; i++) {
+      const f0 = valueOf(run[i - 1].sol) - target;
+      const f1 = valueOf(run[i].sol) - target;
+      if (!Number.isFinite(f0) || !Number.isFinite(f1)) continue;
+      if (f0 === 0) return run[i - 1].sol;
+      if (f0 > 0 !== f1 > 0) {
+        const theta = bisect(
+          (th) => {
+            const s = solveFromPitch(th, ctx);
+            return s ? valueOf(s) - target : NaN;
+          },
+          run[i - 1].theta,
+          run[i].theta,
+        );
+        if (theta != null) {
+          const sol = solveFromPitch(theta, ctx);
+          if (sol) {
+            const err = Math.abs(valueOf(sol) - target);
+            if (!best || err < best.err) best = { sol, err };
+          }
+        }
+      }
+    }
+  }
+  return best ? best.sol : null;
+}
+
+const solveForCameraHeight = (ctx, height) =>
+  solveForValue(ctx, (s) => s.cameraHeight, height);
+
+const solveForOriginDistance = (ctx, distance) =>
+  solveForValue(ctx, (s) => s.originDistance, distance);
+
+/**
+ * Pick a sensible camera when the user has not fine-tuned anything yet: aim for
+ * `preferredHeight` (eye level) and, failing that, take the middle of the widest
+ * valid branch so the user always gets *something* to drag.
+ */
+function initialSolution(ctx, preferredHeight = 5.5) {
+  const wanted = solveForCameraHeight(ctx, preferredHeight);
+  if (wanted) return wanted;
+  const runs = validRuns(ctx);
+  if (!runs.length) return null;
+  let widest = runs[0];
+  for (const run of runs) if (run.length > widest.length) widest = run;
+  // Prefer a plausible standing height inside this branch if one exists.
+  let best = widest[Math.floor(widest.length / 2)].sol;
+  let bestErr = Infinity;
+  for (const { sol } of widest) {
+    const err = Math.abs(sol.cameraHeight - preferredHeight);
+    if (sol.cameraHeight > 0 && err < bestErr) {
+      bestErr = err;
+      best = sol;
+    }
+  }
+  return best;
+}
+
+/** Range of camera heights reachable for this photograph and reference pair. */
+function solutionRanges(ctx) {
+  const runs = validRuns(ctx);
+  const heights = [];
+  const distances = [];
+  for (const run of runs) {
+    for (const { sol } of run) {
+      heights.push(sol.cameraHeight);
+      distances.push(sol.originDistance);
+    }
+  }
+  if (!heights.length) return null;
+  return {
+    height: { min: Math.min(...heights), max: Math.max(...heights) },
+    distance: { min: Math.min(...distances), max: Math.max(...distances) },
+  };
+}
+
+/**
+ * The user-facing entry point.
+ *
+ * @param {object} input
+ * @param {'pitch'|'height'|'distance'} input.mode which quantity the user is holding fixed
+ * @param {number} input.value the value of that quantity (pitch in radians)
+ * @returns {{ok:boolean, reason?:string, projection?:PerspectiveProjection, solution?:object, context?:object}}
+ */
+function calibrate(input) {
+  const {
+    imageWidth,
+    imageHeight,
+    fovDeg,
+    originPoint,
+    knownPoint,
+    originElevation,
+    knownElevation,
+    horizontalDistance,
+    mode = 'height',
+    value = 5.5,
+  } = input;
+
+  if (!(imageWidth > 0) || !(imageHeight > 0)) {
+    return { ok: false, reason: 'No photograph loaded.' };
+  }
+  if (!originPoint || !knownPoint) {
+    return { ok: false, reason: 'Set the origin and the second known point.' };
+  }
+  const separation = Math.hypot(knownPoint.x - originPoint.x, knownPoint.y - originPoint.y);
+  if (separation < 8) {
+    return { ok: false, reason: 'The two reference points are too close together in the photo.' };
+  }
+  if (!(horizontalDistance > 0)) {
+    return { ok: false, reason: 'Horizontal distance must be greater than zero.' };
+  }
+
+  const ctx = calibrationContext({
+    imageWidth,
+    imageHeight,
+    fovDeg,
+    originPoint,
+    knownPoint,
+    deltaElevation: knownElevation - originElevation,
+    horizontalDistance,
+  });
+
+  let solution = null;
+  if (mode === 'pitch') solution = solveFromPitch(value, ctx);
+  else if (mode === 'distance') solution = solveForOriginDistance(ctx, value);
+  else solution = solveForCameraHeight(ctx, value);
+
+  if (!solution) solution = initialSolution(ctx);
+  if (!solution) {
+    return {
+      ok: false,
+      reason:
+        'No camera fits those numbers. Try a different field of view, or check the distance and elevations.',
+      context: ctx,
+    };
+  }
+
+  const projection = new PerspectiveProjection({
+    imageWidth,
+    imageHeight,
+    fovDeg,
+    pitchRad: solution.pitchRad,
+    cameraHeight: solution.cameraHeight,
+    losA: originPoint,
+    losB: knownPoint,
+  });
+
+  return { ok: true, projection, solution, context: ctx };
+}
+
+
+// ======================================================================
+// src/core/ElevationModel.js
+// ======================================================================
+// ElevationModel.js
+//
+// The elevation bookkeeping, kept deliberately separate from the camera. It
+// knows the two measured elevations, the horizontal distance between them, and
+// how finely the user wants the ruler divided. Everything is unit-agnostic —
+// `unitSuffix` is cosmetic only, so feet and metres both work without touching
+// the maths.
+
+
+class ElevationModel {
+  constructor({
+    originElevation = 100,
+    knownElevation = 103,
+    horizontalDistance = 40,
+    increment = 1,
+    range = 10,
+    unitSuffix = "'",
+    decimals = 2,
+  } = {}) {
+    this.originElevation = originElevation;
+    this.knownElevation = knownElevation;
+    this.horizontalDistance = horizontalDistance;
+    this.increment = increment;
+    this.range = range;
+    this.unitSuffix = unitSuffix;
+    this.decimals = decimals;
+  }
+
+  /** Elevation difference between the two measured points. */
+  get deltaElevation() {
+    return this.knownElevation - this.originElevation;
+  }
+
+  /** Rise over run along the line of sight. */
+  get slope() {
+    if (!(this.horizontalDistance > 0)) return 0;
+    return this.deltaElevation / this.horizontalDistance;
+  }
+
+  get gradePercent() {
+    return this.slope * 100;
+  }
+
+  /** Slope expressed the way a landscaper reads it: "1 in 13.3". */
+  get slopeRatio() {
+    const s = Math.abs(this.slope);
+    if (s < 1e-9) return null;
+    return 1 / s;
+  }
+
+  get isFlat() {
+    return Math.abs(this.slope) < 1e-9;
+  }
+
+  /** Convert an offset above the origin into an absolute elevation. */
+  elevationFor(offset) {
+    return this.originElevation + offset;
+  }
+
+  /** Convert an absolute elevation into an offset above the origin. */
+  offsetFor(elevation) {
+    return elevation - this.originElevation;
+  }
+
+  /**
+   * The elevation increments to draw, from -range to +range around the origin.
+   * Offsets are snapped onto exact multiples of the increment so floating point
+   * accumulation never drifts the labels.
+   */
+  levels() {
+    const inc = this.increment > 0 ? this.increment : 1;
+    const steps = Math.floor(this.range / inc + 1e-9);
+    const out = [];
+    for (let k = -steps; k <= steps; k++) {
+      const offset = round(k * inc, 6);
+      out.push({
+        index: k,
+        offset,
+        elevation: round(this.elevationFor(offset), 6),
+        isOrigin: k === 0,
+        isMajor: Math.abs(round((k * inc) % 1, 6)) < 1e-9,
+        label: this.formatElevation(this.elevationFor(offset)),
+        change: this.formatChange(offset),
+      });
+    }
+    return out;
+  }
+
+  // --- formatting ---------------------------------------------------------
+
+  formatNumber(value) {
+    return round(value, this.decimals).toFixed(this.decimals);
+  }
+
+  formatElevation(elevation) {
+    return `${this.formatNumber(elevation)}${this.unitSuffix}`;
+  }
+
+  formatChange(offset) {
+    const v = round(offset, this.decimals);
+    const sign = v > 0 ? '+' : v < 0 ? '-' : '';
+    return `${sign}${this.formatNumber(Math.abs(v))}${this.unitSuffix}`;
+  }
+
+  formatDistance(distance) {
+    return `${this.formatNumber(distance)}${this.unitSuffix}`;
+  }
+
+  formatGrade(slope = this.slope) {
+    const pct = slope * 100;
+    const ratio = Math.abs(slope) > 1e-9 ? ` (1:${round(1 / Math.abs(slope), 1).toFixed(1)})` : '';
+    return `${round(pct, 1).toFixed(1)}%${ratio}`;
+  }
+
+  toJSON() {
+    return {
+      originElevation: this.originElevation,
+      knownElevation: this.knownElevation,
+      horizontalDistance: this.horizontalDistance,
+      increment: this.increment,
+      range: this.range,
+      unitSuffix: this.unitSuffix,
+      decimals: this.decimals,
+    };
+  }
+}
+
+
+// ======================================================================
+// src/core/ElevationRuler.js
+// ======================================================================
+// ElevationRuler.js
+//
+// Builds the ruler's geometry in world coordinates and projects it. It returns
+// plain data — arrays of image-space points with a depth attached — so the
+// renderer stays dumb and the geometry stays testable.
+//
+// Two ruler styles, both fully three dimensional:
+//
+//   SLOPE  the ruler follows the calibrated grade along the line of sight. Each
+//          elevation increment is a rung placed where the ground reaches that
+//          elevation, so climbing the ruler walks you into the distance. This is
+//          the staircase look — rungs get shorter and bunch up as they recede.
+//
+//   STAFF  a virtual levelling rod planted at one distance, graduated in
+//          elevation increments. Nothing recedes, but the graduations still
+//          compress towards the horizon because they are projected, not drawn.
+//
+// Neither style implies anything about the landscape left or right of the
+// measurement plane, which is why the rungs are a deliberately finite width.
+
+class ElevationRuler {
+  constructor({ projection, model, originDistance, rungWidth = 10, staffWidth = 1.5 }) {
+    this.projection = projection;
+    this.model = model;
+    this.originDistance = originDistance;
+    this.rungWidth = rungWidth;
+    this.staffWidth = staffWidth;
+  }
+
+  /** Distance along the line of sight at which the ground reaches `offset`. */
+  distanceForOffset(offset) {
+    const s = this.model.slope;
+    if (Math.abs(s) < 1e-9) return offset === 0 ? this.originDistance : null;
+    return this.originDistance + offset / s;
+  }
+
+  /** Ground elevation offset at a distance along the line of sight. */
+  offsetAtDistance(Z) {
+    return this.model.slope * (Z - this.originDistance);
+  }
+
+  /**
+   * Build one rung: a horizontal bar of `width` centred on the measurement
+   * plane at (Y, Z), plus the projected metadata the renderer needs.
+   */
+  _rung(level, Y, Z, width) {
+    const p = this.projection;
+    const half = width / 2;
+    const left = p.project(-half, Y, Z);
+    const right = p.project(half, Y, Z);
+    const centre = p.project(0, Y, Z);
+    if (!left || !right || !centre) {
+      return { level, Y, Z, visible: false };
+    }
+    const screenWidth = Math.hypot(right.x - left.x, right.y - left.y);
+    return {
+      level,
+      Y,
+      Z,
+      left,
+      right,
+      centre,
+      depth: centre.depth,
+      screenWidth,
+      visible: true,
+    };
+  }
+
+  /**
+   * Drop rungs that have collapsed into each other near the horizon, and rungs
+   * that have wandered far outside the photograph. Without this the top of the
+   * ruler turns into an unreadable smear of overlapping labels.
+   */
+  _prune(rungs, { minSpacing = 5, minWidth = 6, margin = 0.6 } = {}) {
+    const { imageWidth: w, imageHeight: h } = this.projection;
+    const mx = w * margin;
+    const my = h * margin;
+    const inFrame = (pt) => pt.x > -mx && pt.x < w + mx && pt.y > -my && pt.y < h + my;
+
+    const kept = [];
+    const ordered = rungs.filter((r) => r.visible).sort((a, b) => a.depth - b.depth);
+    for (const r of ordered) {
+      if (r.screenWidth < minWidth) continue;
+      if (!inFrame(r.centre)) continue;
+      const last = kept[kept.length - 1];
+      if (last) {
+        const gap = Math.hypot(r.centre.x - last.centre.x, r.centre.y - last.centre.y);
+        // Always keep the origin rung, it is the datum.
+        if (gap < minSpacing && !r.level.isOrigin) continue;
+      }
+      kept.push(r);
+    }
+    return kept;
+  }
+
+  /** Ruler following the calibrated grade. Empty when the grade is flat. */
+  slopeRungs(options = {}) {
+    if (this.model.isFlat) return [];
+    const out = [];
+    for (const level of this.model.levels()) {
+      const Z = this.distanceForOffset(level.offset);
+      if (Z == null || !(Z > 1e-6)) continue;
+      out.push(this._rung(level, level.offset, Z, this.rungWidth));
+    }
+    return this._prune(out, options);
+  }
+
+  /** Ruler as a levelling rod standing at `Z`. */
+  staffRungs(Z = this.originDistance, options = {}) {
+    if (!(Z > 1e-6)) return [];
+    const out = [];
+    for (const level of this.model.levels()) {
+      out.push(this._rung(level, level.offset, Z, level.isOrigin ? this.staffWidth * 2 : this.staffWidth));
+    }
+    // A staff is one object at one distance: spacing shrinks but nothing
+    // recedes, so prune on screen spacing alone.
+    return this._prune(out, { minSpacing: 2, minWidth: 0, ...options }).sort((a, b) => a.Y - b.Y);
+  }
+
+  /** The vertical post of the staff, from the lowest to the highest rung. */
+  staffPost(Z = this.originDistance) {
+    const rungs = this.staffRungs(Z);
+    if (rungs.length < 2) return null;
+    return { a: rungs[0].centre, b: rungs[rungs.length - 1].centre };
+  }
+
+  /**
+   * The calibrated ground line along the measurement plane, sampled so the
+   * renderer can draw it as a polyline (it is straight in the world, and
+   * therefore straight in the image, but sampling keeps clipping simple).
+   */
+  groundLine({ from = null, to = null, samples = 48 } = {}) {
+    const p = this.projection;
+    const near = from ?? Math.max(0.5, this.originDistance * 0.15);
+    const far = to ?? this.originDistance + this.model.horizontalDistance * 6;
+    const pts = [];
+    for (let i = 0; i <= samples; i++) {
+      const Z = near + ((far - near) * i) / samples;
+      const proj = p.projectPlane(this.offsetAtDistance(Z), Z);
+      if (proj) pts.push({ ...proj, Z });
+    }
+    return pts;
+  }
+
+  /**
+   * The line of sight as the user placed it, extended to the vanishing point so
+   * it reads as a direction in the scene rather than a segment between two taps.
+   */
+  lineOfSight() {
+    const p = this.projection;
+    return {
+      near: p.losA,
+      far: p.losB,
+      vanishing: p.vanishingPoint,
+      horizon: p.horizonSegment(),
+    };
+  }
+
+  /** Everything the renderer needs, in one call. */
+  build({ style = 'slope', staffDistance = null } = {}) {
+    const useSlope = style === 'slope' || style === 'both';
+    const useStaff = style === 'staff' || style === 'both' || this.model.isFlat;
+    return {
+      style,
+      slope: useSlope ? this.slopeRungs() : [],
+      staff: useStaff ? this.staffRungs(staffDistance ?? this.originDistance) : [],
+      staffPost: useStaff ? this.staffPost(staffDistance ?? this.originDistance) : null,
+      ground: this.groundLine(),
+      sight: this.lineOfSight(),
+    };
+  }
+}
+
+
+// ======================================================================
+// src/core/MeasurementAnnotation.js
+// ======================================================================
+// MeasurementAnnotation.js
+//
+// A single point the user has placed on the photograph, and the elevation the
+// camera model reads back for it.
+//
+// The distinction the app has to keep honest: the origin and the second
+// reference point are MEASURED — the user typed their elevations in and the
+// app must never overwrite them. Everything else is PROJECTED: an estimate
+// interpolated from the calibration, only as good as the calibration is.
+
+const MEASURED = 'measured';
+const PROJECTED = 'projected';
+
+let nextId = 1;
+const newId = (prefix = 'p') => `${prefix}${nextId++}`;
+
+class MeasurementAnnotation {
+  /**
+   * @param {object} o
+   * @param {{x,y}}  o.imagePoint  where the marker sits, in photo pixels
+   * @param {'ground'|'depth'} o.mode how to turn the view ray into an elevation:
+   *        'ground' intersects the calibrated grade, 'depth' reads the ray at a
+   *        fixed distance along the line of sight (a virtual levelling staff).
+   */
+  constructor({
+    id = newId(),
+    imagePoint,
+    kind = PROJECTED,
+    mode = 'ground',
+    fixedDistance = null,
+    label = '',
+    elevation = null,
+    role = 'point',
+    labelOffset = { x: 18, y: -18 },
+    labelMoved = false,
+    locked = false,
+  }) {
+    this.id = id;
+    this.imagePoint = { ...imagePoint };
+    this.kind = kind;
+    this.mode = mode;
+    this.fixedDistance = fixedDistance;
+    this.label = label;
+    this.role = role; // 'origin' | 'known' | 'point'
+    this.labelOffset = { ...labelOffset };
+    this.labelMoved = labelMoved;
+    this.locked = locked;
+
+    // Filled in by solve().
+    this.elevation = elevation;
+    this.offset = null;
+    this.distance = null;
+    this.offPlanePx = 0;
+    this.valid = false;
+    this.reason = '';
+  }
+
+  get isMeasured() {
+    return this.kind === MEASURED;
+  }
+
+  /**
+   * Recompute this point's elevation against the current camera and model.
+   * Measured points keep the elevation the user typed; what gets solved for them
+   * is only their distance along the line of sight, so dimensions still work.
+   */
+  solve(projection, model, originDistance) {
+    this.valid = false;
+    this.reason = '';
+    if (!projection || !model) {
+      this.reason = 'Not calibrated yet.';
+      return this;
+    }
+
+    const { t, across } = projection.toLineCoords(this.imagePoint);
+    this.offPlanePx = across;
+
+    if (this.isMeasured) {
+      // Elevation is a given; find where along the line of sight it sits.
+      this.offset = model.offsetFor(this.elevation);
+      const Z = projection.depthForElevation(t, this.offset);
+      this.distance = Z;
+      this.valid = Z != null;
+      if (!this.valid) this.reason = 'Reference point is on the horizon.';
+      return this;
+    }
+
+    const hit =
+      this.mode === 'depth' && this.fixedDistance != null
+        ? projection.elevationAtDepth(t, this.fixedDistance)
+        : projection.intersectGround(t, model.slope, originDistance);
+
+    if (!hit) {
+      this.reason =
+        this.mode === 'depth'
+          ? 'No reading at that distance.'
+          : 'That sight line never meets the calibrated grade — it is at or beyond the horizon.';
+      return this;
+    }
+
+    this.offset = hit.Y;
+    this.elevation = model.elevationFor(hit.Y);
+    this.distance = hit.Z;
+    this.valid = true;
+    return this;
+  }
+
+  /** Distance from the origin along the line of sight (signed). */
+  distanceFromOrigin(originDistance) {
+    if (this.distance == null) return null;
+    return this.distance - originDistance;
+  }
+
+  toJSON() {
+    return {
+      id: this.id,
+      imagePoint: this.imagePoint,
+      kind: this.kind,
+      mode: this.mode,
+      fixedDistance: this.fixedDistance,
+      label: this.label,
+      role: this.role,
+      labelOffset: this.labelOffset,
+      labelMoved: this.labelMoved,
+      locked: this.locked,
+      elevation: this.isMeasured ? this.elevation : null,
+    };
+  }
+
+  static fromJSON(o) {
+    const m = new MeasurementAnnotation(o);
+    if (o.kind === MEASURED) m.elevation = o.elevation;
+    return m;
+  }
+}
+
+/**
+ * A dimension drawn between two measurement points: the vertical rise, the
+ * horizontal run, the elevation change, or the grade between them. These are
+ * the annotation tools from the brief, all expressed as one linked pair so the
+ * numbers can never drift out of step with the points they describe.
+ */
+class DimensionAnnotation {
+  constructor({
+    id = newId('d'),
+    fromId,
+    toId,
+    style = 'vertical', // 'vertical' | 'horizontal' | 'change' | 'grade'
+    label = '',
+    labelOffset = { x: 0, y: 0 },
+  }) {
+    this.id = id;
+    this.fromId = fromId;
+    this.toId = toId;
+    this.style = style;
+    this.label = label;
+    this.labelOffset = { ...labelOffset };
+  }
+
+  /**
+   * Compute the text and the anchor geometry for this dimension.
+   * @returns {{ok:boolean, text?:string, from?:object, to?:object}}
+   */
+  resolve(points, model, projection, originDistance) {
+    const a = points.get(this.fromId);
+    const b = points.get(this.toId);
+    if (!a || !b || !a.valid || !b.valid) return { ok: false };
+
+    const rise = b.elevation - a.elevation;
+    const run = b.distance != null && a.distance != null ? b.distance - a.distance : null;
+
+    let text = this.label;
+    if (!text) {
+      switch (this.style) {
+        case 'horizontal':
+          text = run == null ? '—' : `${model.formatNumber(Math.abs(run))}${model.unitSuffix}`;
+          break;
+        case 'grade':
+          text =
+            run == null || Math.abs(run) < 1e-9
+              ? '—'
+              : `GRADE ${model.formatGrade(rise / run)}`;
+          break;
+        case 'change':
+          text = model.formatChange(rise);
+          break;
+        case 'vertical':
+        default:
+          text = model.formatChange(rise);
+          break;
+      }
+    }
+
+    return {
+      ok: true,
+      text,
+      rise,
+      run,
+      a,
+      b,
+      projection,
+      originDistance,
+    };
+  }
+
+  toJSON() {
+    return {
+      id: this.id,
+      fromId: this.fromId,
+      toId: this.toId,
+      style: this.style,
+      label: this.label,
+      labelOffset: this.labelOffset,
+    };
+  }
+
+  static fromJSON(o) {
+    return new DimensionAnnotation(o);
+  }
+}
+
+
+// ======================================================================
+// src/core/AnnotationManager.js
+// ======================================================================
+// AnnotationManager.js
+//
+// Owns the measurement points and the dimensions between them, keeps them in
+// step with the current calibration, and answers "what did the user just touch?".
+// No rendering, no DOM.
+
+
+class AnnotationManager {
+  constructor() {
+    /** @type {Map<string, MeasurementAnnotation>} */
+    this.points = new Map();
+    /** @type {Map<string, DimensionAnnotation>} */
+    this.dimensions = new Map();
+    this.selectedId = null;
+  }
+
+  // --- points -------------------------------------------------------------
+
+  addPoint(options) {
+    const p = new MeasurementAnnotation(options);
+    this.points.set(p.id, p);
+    return p;
+  }
+
+  /** The origin and the second known point are singletons, replaced not stacked. */
+  setReferencePoint(role, imagePoint, elevation, labelOffset = null) {
+    const existing = this.referencePoint(role);
+    for (const [id, p] of this.points) {
+      if (p.role === role) this.points.delete(id);
+    }
+    return this.addPoint({
+      imagePoint,
+      elevation,
+      kind: MEASURED,
+      role,
+      label: role === 'origin' ? 'ORIGIN' : 'POINT B',
+      // Keep a callout the user has already positioned by hand.
+      labelOffset:
+        existing?.labelMoved
+          ? existing.labelOffset
+          : (labelOffset ?? (role === 'origin' ? { x: 20, y: 26 } : { x: 20, y: -26 })),
+      labelMoved: existing?.labelMoved ?? false,
+    });
+  }
+
+  referencePoint(role) {
+    for (const p of this.points.values()) if (p.role === role) return p;
+    return null;
+  }
+
+  get origin() {
+    return this.referencePoint('origin');
+  }
+
+  get known() {
+    return this.referencePoint('known');
+  }
+
+  /** Measurement points only — the ones the user added with ADD POINT. */
+  get measurements() {
+    return [...this.points.values()].filter((p) => p.role === 'point');
+  }
+
+  removePoint(id) {
+    const removed = this.points.delete(id);
+    // A dimension without both ends is meaningless.
+    for (const [dId, d] of this.dimensions) {
+      if (d.fromId === id || d.toId === id) this.dimensions.delete(dId);
+    }
+    if (this.selectedId === id) this.selectedId = null;
+    return removed;
+  }
+
+  movePoint(id, imagePoint) {
+    const p = this.points.get(id);
+    if (!p || p.locked) return null;
+    p.imagePoint = { ...imagePoint };
+    return p;
+  }
+
+  // --- dimensions ---------------------------------------------------------
+
+  addDimension(fromId, toId, style = 'vertical') {
+    if (!this.points.has(fromId) || !this.points.has(toId) || fromId === toId) return null;
+    // Several dimensions can describe the same pair of points (rise, run,
+    // grade). They all anchor on the same midpoint, so stack them rather than
+    // letting the second one land on top of the first.
+    const sharing = [...this.dimensions.values()].filter(
+      (x) =>
+        (x.fromId === fromId && x.toId === toId) || (x.fromId === toId && x.toId === fromId),
+    ).length;
+    const d = new DimensionAnnotation({
+      fromId,
+      toId,
+      style,
+      labelOffset: { x: 0, y: -22 - sharing * 28 },
+    });
+    this.dimensions.set(d.id, d);
+    return d;
+  }
+
+  /** Midpoint anchor of a dimension's label, in photo pixels. */
+  dimensionAnchor(dimension, unit) {
+    const a = this.points.get(dimension.fromId);
+    const b = this.points.get(dimension.toId);
+    if (!a || !b) return null;
+    return {
+      x: (a.imagePoint.x + b.imagePoint.x) / 2 + dimension.labelOffset.x * unit,
+      y: (a.imagePoint.y + b.imagePoint.y) / 2 + dimension.labelOffset.y * unit,
+    };
+  }
+
+  /** Nearest dimension label under the touch, so it can be dragged clear. */
+  hitTestDimension(imagePoint, tolerance, unit) {
+    let best = null;
+    let bestDist = Infinity;
+    for (const d of this.dimensions.values()) {
+      const anchor = this.dimensionAnchor(d, unit);
+      if (!anchor) continue;
+      // Dimension labels are centred on their anchor.
+      const dx = Math.max(Math.abs(imagePoint.x - anchor.x) - 90 * unit, 0);
+      const dy = Math.max(Math.abs(imagePoint.y - anchor.y) - 15 * unit, 0);
+      const dd = Math.hypot(dx, dy);
+      if (dd <= tolerance * 0.5 && dd < bestDist) {
+        bestDist = dd;
+        best = d;
+      }
+    }
+    return best;
+  }
+
+  moveDimensionLabel(id, imagePoint, unit, grab = { x: 0, y: 0 }) {
+    const d = this.dimensions.get(id);
+    const a = this.points.get(d?.fromId);
+    const b = this.points.get(d?.toId);
+    if (!d || !a || !b) return null;
+    const midX = (a.imagePoint.x + b.imagePoint.x) / 2;
+    const midY = (a.imagePoint.y + b.imagePoint.y) / 2;
+    d.labelOffset = {
+      x: (imagePoint.x - midX) / unit - grab.x,
+      y: (imagePoint.y - midY) / unit - grab.y,
+    };
+    return d;
+  }
+
+  removeDimension(id) {
+    return this.dimensions.delete(id);
+  }
+
+  // --- solving ------------------------------------------------------------
+
+  /** Re-derive every point against a new calibration. Call after any change. */
+  solveAll(projection, model, originDistance) {
+    for (const p of this.points.values()) p.solve(projection, model, originDistance);
+    return this;
+  }
+
+  resolveDimensions(model, projection, originDistance) {
+    const out = [];
+    for (const d of this.dimensions.values()) {
+      const r = d.resolve(this.points, model, projection, originDistance);
+      if (r.ok) out.push({ dimension: d, ...r });
+    }
+    return out;
+  }
+
+  // --- hit testing --------------------------------------------------------
+
+  /**
+   * Nearest point within `tolerance` image pixels. Measurement points win ties
+   * against reference points, because reference points are the ones you least
+   * want to nudge by accident.
+   */
+  /**
+   * Nearest point whose CALLOUT was touched. Checked before the markers so a
+   * label can be dragged clear of whatever it is covering.
+   */
+  hitTestLabel(imagePoint, tolerance, unit) {
+    let best = null;
+    let bestDist = Infinity;
+    for (const p of this.points.values()) {
+      const anchor = {
+        x: p.imagePoint.x + p.labelOffset.x * unit,
+        y: p.imagePoint.y + p.labelOffset.y * unit,
+      };
+      // The callout hangs down and to whichever side the offset points, so the
+      // hit box is offset from its anchor rather than centred on it.
+      const w = 150 * unit;
+      const h = 66 * unit;
+      const x0 = p.labelOffset.x < 0 ? anchor.x - w : anchor.x;
+      const dx = Math.max(x0 - imagePoint.x, 0, imagePoint.x - (x0 + w));
+      const dy = Math.max(anchor.y - imagePoint.y, 0, imagePoint.y - (anchor.y + h));
+      const d = Math.hypot(dx, dy);
+      if (d <= tolerance * 0.5 && d < bestDist) {
+        bestDist = d;
+        best = p;
+      }
+    }
+    return best;
+  }
+
+  moveLabel(id, imagePoint, unit, grab = { x: 0, y: 0 }) {
+    const p = this.points.get(id);
+    if (!p) return null;
+    p.labelOffset = {
+      x: (imagePoint.x - p.imagePoint.x) / unit - grab.x,
+      y: (imagePoint.y - p.imagePoint.y) / unit - grab.y,
+    };
+    p.labelMoved = true;
+    return p;
+  }
+
+  hitTest(imagePoint, tolerance) {
+    let best = null;
+    let bestScore = Infinity;
+    for (const p of this.points.values()) {
+      const d = Math.hypot(p.imagePoint.x - imagePoint.x, p.imagePoint.y - imagePoint.y);
+      if (d > tolerance) continue;
+      const score = d + (p.role === 'point' ? 0 : tolerance * 0.35);
+      if (score < bestScore) {
+        bestScore = score;
+        best = p;
+      }
+    }
+    return best;
+  }
+
+  select(id) {
+    this.selectedId = this.points.has(id) ? id : null;
+    return this.selected;
+  }
+
+  get selected() {
+    return this.selectedId ? this.points.get(this.selectedId) ?? null : null;
+  }
+
+  clearMeasurements() {
+    for (const p of this.measurements) this.removePoint(p.id);
+  }
+
+  clear() {
+    this.points.clear();
+    this.dimensions.clear();
+    this.selectedId = null;
+  }
+
+  // --- persistence --------------------------------------------------------
+
+  toJSON() {
+    return {
+      points: [...this.points.values()].map((p) => p.toJSON()),
+      dimensions: [...this.dimensions.values()].map((d) => d.toJSON()),
+    };
+  }
+
+  loadJSON(data) {
+    this.clear();
+    for (const p of data?.points ?? []) {
+      const point = MeasurementAnnotation.fromJSON(p);
+      this.points.set(point.id, point);
+    }
+    for (const d of data?.dimensions ?? []) {
+      const dim = DimensionAnnotation.fromJSON(d);
+      this.dimensions.set(dim.id, dim);
+    }
+    return this;
+  }
+}
+
+
+
+// ======================================================================
+// src/ui/PhotoView.js
+// ======================================================================
+// PhotoView.js
+//
+// The working canvas: holds the photograph, maps between screen and photo
+// pixels, and turns touches into gestures. It knows nothing about elevations —
+// it reports "the user touched photo pixel (x, y)" and lets the app decide.
+//
+// The photograph itself is never modified. It is drawn from the original
+// HTMLImageElement on every frame and the overlay is composited on top.
+
+
+class PhotoView {
+  constructor(canvas, { onPointerDown, onPointerMove, onPointerUp, onViewChange } = {}) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.image = null;
+    this.imageWidth = 0;
+    this.imageHeight = 0;
+
+    // View transform: photo pixel -> css pixel is  p * scale + offset
+    this.scale = 1;
+    this.offset = { x: 0, y: 0 };
+    this.minScale = 0.05;
+    this.maxScale = 40;
+
+    this.onPointerDown = onPointerDown;
+    this.onPointerMove = onPointerMove;
+    this.onPointerUp = onPointerUp;
+    this.onViewChange = onViewChange;
+
+    this.drawOverlay = null; // set by the app: (ctx) => void
+    this._pointers = new Map();
+    this._gesture = null;
+    this._dpr = 1;
+    this._raf = null;
+
+    this._bind();
+  }
+
+  // --- lifecycle ----------------------------------------------------------
+
+  _bind() {
+    const c = this.canvas;
+    c.style.touchAction = 'none';
+    c.addEventListener('pointerdown', this._down, { passive: false });
+    c.addEventListener('pointermove', this._move, { passive: false });
+    c.addEventListener('pointerup', this._up, { passive: false });
+    c.addEventListener('pointercancel', this._up, { passive: false });
+    c.addEventListener('pointerleave', this._up, { passive: false });
+    c.addEventListener('wheel', this._wheel, { passive: false });
+    // Safari on iPad still fires these for pinch on some surfaces.
+    c.addEventListener('gesturestart', (e) => e.preventDefault());
+    c.addEventListener('gesturechange', (e) => e.preventDefault());
+  }
+
+  setImage(image) {
+    this.image = image;
+    this.imageWidth = image ? image.naturalWidth || image.width : 0;
+    this.imageHeight = image ? image.naturalHeight || image.height : 0;
+    this.fit();
+  }
+
+  resize() {
+    const rect = this.canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    this._dpr = dpr;
+    const w = Math.max(1, Math.round(rect.width * dpr));
+    const h = Math.max(1, Math.round(rect.height * dpr));
+    if (this.canvas.width !== w || this.canvas.height !== h) {
+      this.canvas.width = w;
+      this.canvas.height = h;
+    }
+    this.cssWidth = rect.width;
+    this.cssHeight = rect.height;
+    this.render();
+  }
+
+  /** Scale and centre the photograph so the whole frame is visible. */
+  fit(padding = 0) {
+    if (!this.image || !this.cssWidth) return;
+    const sx = (this.cssWidth - padding * 2) / this.imageWidth;
+    const sy = (this.cssHeight - padding * 2) / this.imageHeight;
+    this.scale = Math.min(sx, sy);
+    this.minScale = this.scale * 0.5;
+    this.offset = {
+      x: (this.cssWidth - this.imageWidth * this.scale) / 2,
+      y: (this.cssHeight - this.imageHeight * this.scale) / 2,
+    };
+    this._changed();
+  }
+
+  // --- coordinate conversion ---------------------------------------------
+
+  toPhoto(clientX, clientY) {
+    const rect = this.canvas.getBoundingClientRect();
+    return {
+      x: (clientX - rect.left - this.offset.x) / this.scale,
+      y: (clientY - rect.top - this.offset.y) / this.scale,
+    };
+  }
+
+  toScreen(p) {
+    return { x: p.x * this.scale + this.offset.x, y: p.y * this.scale + this.offset.y };
+  }
+
+  /** A touch-sized tolerance in screen pixels, expressed in photo pixels. */
+  photoTolerance(screenPx = 28) {
+    return screenPx / this.scale;
+  }
+
+  inBounds(p) {
+    return p.x >= 0 && p.y >= 0 && p.x <= this.imageWidth && p.y <= this.imageHeight;
+  }
+
+  // --- gestures -----------------------------------------------------------
+
+  _down = (e) => {
+    e.preventDefault();
+    this.canvas.setPointerCapture?.(e.pointerId);
+    this._pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (this._pointers.size === 2) {
+      // A second finger always means transform, so cancel whatever the first
+      // finger had started. Prevents a stray drag while pinching.
+      if (this._gesture?.type === 'app') this.onPointerUp?.(null, { cancelled: true });
+      this._gesture = this._startPinch();
+      return;
+    }
+    if (this._pointers.size > 2) return;
+
+    const photo = this.toPhoto(e.clientX, e.clientY);
+    const handled = this.onPointerDown?.(photo, e);
+    this._gesture = handled
+      ? { type: 'app' }
+      : { type: 'pan', last: { x: e.clientX, y: e.clientY } };
+  };
+
+  _move = (e) => {
+    if (!this._pointers.has(e.pointerId)) return;
+    e.preventDefault();
+    this._pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (this._gesture?.type === 'pinch') {
+      this._updatePinch();
+      return;
+    }
+    if (this._gesture?.type === 'pan') {
+      const dx = e.clientX - this._gesture.last.x;
+      const dy = e.clientY - this._gesture.last.y;
+      this._gesture.last = { x: e.clientX, y: e.clientY };
+      this.offset = { x: this.offset.x + dx, y: this.offset.y + dy };
+      this._changed();
+      return;
+    }
+    if (this._gesture?.type === 'app') {
+      this.onPointerMove?.(this.toPhoto(e.clientX, e.clientY), e);
+    }
+  };
+
+  _up = (e) => {
+    if (!this._pointers.has(e.pointerId)) return;
+    e.preventDefault();
+    this._pointers.delete(e.pointerId);
+    this.canvas.releasePointerCapture?.(e.pointerId);
+
+    if (this._gesture?.type === 'pinch') {
+      // Drop back to a pan with whichever finger is still down.
+      const remaining = [...this._pointers.values()][0];
+      this._gesture = remaining ? { type: 'pan', last: { ...remaining } } : null;
+      return;
+    }
+    if (this._gesture?.type === 'app') {
+      this.onPointerUp?.(this.toPhoto(e.clientX, e.clientY), e);
+    }
+    if (this._pointers.size === 0) this._gesture = null;
+  };
+
+  _startPinch() {
+    const [a, b] = [...this._pointers.values()];
+    return {
+      type: 'pinch',
+      startDist: Math.hypot(a.x - b.x, a.y - b.y),
+      startScale: this.scale,
+      startMid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+      startOffset: { ...this.offset },
+    };
+  }
+
+  _updatePinch() {
+    const pts = [...this._pointers.values()];
+    if (pts.length < 2) return;
+    const [a, b] = pts;
+    const g = this._gesture;
+    const d = Math.hypot(a.x - b.x, a.y - b.y);
+    if (g.startDist < 1) return;
+    const factor = d / g.startDist;
+    const scale = clamp(g.startScale * factor, this.minScale, this.maxScale);
+    const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const rect = this.canvas.getBoundingClientRect();
+
+    // Keep the photo point under the pinch midpoint anchored, and let the
+    // midpoint itself carry the pan.
+    const anchor = {
+      x: (g.startMid.x - rect.left - g.startOffset.x) / g.startScale,
+      y: (g.startMid.y - rect.top - g.startOffset.y) / g.startScale,
+    };
+    this.scale = scale;
+    this.offset = {
+      x: mid.x - rect.left - anchor.x * scale,
+      y: mid.y - rect.top - anchor.y * scale,
+    };
+    this._changed();
+  }
+
+  _wheel = (e) => {
+    e.preventDefault();
+    const rect = this.canvas.getBoundingClientRect();
+    const anchor = this.toPhoto(e.clientX, e.clientY);
+    const factor = Math.exp(-e.deltaY * 0.0016);
+    this.scale = clamp(this.scale * factor, this.minScale, this.maxScale);
+    this.offset = {
+      x: e.clientX - rect.left - anchor.x * this.scale,
+      y: e.clientY - rect.top - anchor.y * this.scale,
+    };
+    this._changed();
+  };
+
+  zoomBy(factor) {
+    const anchor = {
+      x: (this.cssWidth / 2 - this.offset.x) / this.scale,
+      y: (this.cssHeight / 2 - this.offset.y) / this.scale,
+    };
+    this.scale = clamp(this.scale * factor, this.minScale, this.maxScale);
+    this.offset = {
+      x: this.cssWidth / 2 - anchor.x * this.scale,
+      y: this.cssHeight / 2 - anchor.y * this.scale,
+    };
+    this._changed();
+  }
+
+  _changed() {
+    this.onViewChange?.();
+    this.render();
+  }
+
+  // --- rendering ----------------------------------------------------------
+
+  /** Coalesce redraws onto the next animation frame. */
+  render() {
+    if (this._raf) return;
+    this._raf = requestAnimationFrame(() => {
+      this._raf = null;
+      this._paint();
+    });
+  }
+
+  _paint() {
+    const ctx = this.ctx;
+    const dpr = this._dpr;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    if (!this.image) return;
+
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    ctx.translate(this.offset.x, this.offset.y);
+    ctx.scale(this.scale, this.scale);
+
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(this.image, 0, 0, this.imageWidth, this.imageHeight);
+    this.drawOverlay?.(ctx);
+
+    ctx.restore();
+  }
+}
+
+
+// ======================================================================
+// src/ui/OverlayRenderer.js
+// ======================================================================
+// OverlayRenderer.js
+//
+// Draws the ruler and the annotations. Everything is drawn in PHOTO PIXEL
+// coordinates; the caller sets a transform beforehand. That is what makes the
+// export byte-for-byte the same picture as the screen — the export just uses
+// the identity transform at full resolution instead of the fit-to-screen one.
+//
+// Line weights and type sizes are derived from the photograph's own width, so
+// the overlay scales with the image rather than with the viewport.
+
+
+const PALETTE = {
+  rung: '#8fe9ff',
+  rungMajor: '#ffffff',
+  origin: '#3ddc84',
+  known: '#ffa726',
+  sight: '#ffb300',
+  measure: '#ff5cae',
+  ground: '#7cf7c4',
+  horizon: '#c9d6e2',
+  dimension: '#ffffff',
+  halo: 'rgba(0, 0, 0, 0.72)',
+  text: '#ffffff',
+};
+
+class OverlayRenderer {
+  constructor() {
+    this.opacity = 1;
+  }
+
+  /**
+   * @param {CanvasRenderingContext2D} ctx transformed into photo pixel space
+   * @param {object} scene everything to draw
+   */
+  draw(ctx, scene) {
+    const {
+      projection,
+      model,
+      ruler,
+      annotations,
+      options,
+      originDistance,
+      imageWidth,
+      imageHeight,
+    } = scene;
+
+    if (!projection || !model || !ruler) return;
+
+    const u = imageWidth / 1000; // one "design unit"
+    ctx.save();
+    ctx.globalAlpha = options.opacity;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.textBaseline = 'middle';
+
+    const geo = ruler.build({
+      style: options.rulerStyle,
+      staffDistance: options.staffDistance ?? originDistance,
+    });
+
+    if (options.showHorizon) this._horizon(ctx, u, geo.sight.horizon);
+    if (options.showRuler) {
+      this._groundLine(ctx, u, geo.ground, imageWidth, imageHeight);
+      this._slopeRungs(ctx, u, geo.slope, model, options);
+      this._staff(ctx, u, geo.staff, geo.staffPost, model, options);
+    }
+    if (options.showSight) this._lineOfSight(ctx, u, projection, geo.sight, imageWidth, imageHeight);
+
+    this._dimensions(ctx, u, annotations, model, projection, originDistance);
+    this._points(ctx, u, annotations, model, options);
+    if (options.showCrosshair) this._crosshair(ctx, u, projection, imageWidth, imageHeight);
+
+    ctx.restore();
+  }
+
+  // --- primitives ---------------------------------------------------------
+
+  _stroke(ctx, path, { color, width, halo = true, alpha = 1, dash = null }) {
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    if (dash) ctx.setLineDash(dash);
+    if (halo) {
+      ctx.strokeStyle = PALETTE.halo;
+      ctx.lineWidth = width * 2.6;
+      path();
+      ctx.stroke();
+    }
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    path();
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  _line(ctx, a, b, style) {
+    this._stroke(
+      ctx,
+      () => {
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+      },
+      style,
+    );
+  }
+
+  _polyline(ctx, pts, style) {
+    if (pts.length < 2) return;
+    this._stroke(
+      ctx,
+      () => {
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      },
+      style,
+    );
+  }
+
+  /**
+   * Text with a dark halo so it stays readable over any photograph, plus an
+   * optional filled plate for the labels that carry numbers.
+   */
+  _label(ctx, text, at, u, opts = {}) {
+    const {
+      size = 22,
+      color = PALETTE.text,
+      align = 'left',
+      weight = '600',
+      plate = false,
+      plateColor = 'rgba(8, 14, 20, 0.66)',
+      alpha = 1,
+      angle = 0,
+    } = opts;
+
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    ctx.translate(at.x, at.y);
+    if (angle) ctx.rotate(angle);
+    const px = size * u;
+    ctx.font = `${weight} ${px}px ui-monospace, "SF Mono", Menlo, Consolas, monospace`;
+    ctx.textAlign = align;
+    ctx.textBaseline = 'middle';
+
+    if (plate) {
+      const w = ctx.measureText(text).width;
+      const padX = px * 0.45;
+      const padY = px * 0.36;
+      const x = align === 'right' ? -w - padX : align === 'center' ? -w / 2 - padX : -padX;
+      ctx.fillStyle = plateColor;
+      const r = px * 0.28;
+      const bw = w + padX * 2;
+      const bh = px + padY * 2;
+      const by = -bh / 2;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(x, by, bw, bh, r);
+      else ctx.rect(x, by, bw, bh);
+      ctx.fill();
+    } else {
+      ctx.strokeStyle = PALETTE.halo;
+      ctx.lineWidth = px * 0.24;
+      ctx.lineJoin = 'round';
+      ctx.strokeText(text, 0, 0);
+    }
+
+    ctx.fillStyle = color;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  }
+
+  _marker(ctx, at, u, { color, size = 9, filled = true, ring = false }) {
+    const r = size * u;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(at.x, at.y, r, 0, Math.PI * 2);
+    ctx.strokeStyle = PALETTE.halo;
+    ctx.lineWidth = 3.2 * u;
+    ctx.stroke();
+    if (filled) {
+      ctx.fillStyle = color;
+      ctx.fill();
+    }
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.2 * u;
+    ctx.stroke();
+    if (ring) {
+      ctx.beginPath();
+      ctx.arc(at.x, at.y, r * 2, 0, Math.PI * 2);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.6 * u;
+      ctx.setLineDash([4 * u, 4 * u]);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // --- scene elements -----------------------------------------------------
+
+  _horizon(ctx, u, segment) {
+    if (!segment) return;
+    this._line(ctx, segment.a, segment.b, {
+      color: PALETTE.horizon,
+      width: 1.6 * u,
+      alpha: 0.5,
+      dash: [10 * u, 9 * u],
+    });
+    const dir = normalize(sub(segment.b, segment.a));
+    const at = add(segment.a, scale(dir, dist(segment.a, segment.b) * 0.06));
+    this._label(ctx, 'HORIZON', add(at, scale(perp(dir), -10 * u)), u, {
+      size: 13,
+      color: PALETTE.horizon,
+      alpha: 0.75,
+    });
+  }
+
+  _groundLine(ctx, u, pts, w, h) {
+    const inside = pts.filter(
+      (p) => p.x > -w * 0.5 && p.x < w * 1.5 && p.y > -h * 0.5 && p.y < h * 1.5,
+    );
+    if (inside.length < 2) return;
+    this._polyline(ctx, inside, {
+      color: PALETTE.ground,
+      width: 2 * u,
+      alpha: 0.55,
+      dash: [7 * u, 7 * u],
+    });
+  }
+
+  /**
+   * The staircase. Each rung is a real horizontal bar in the scene, so it
+   * shortens and the gaps close up as the ruler climbs into the distance.
+   * Rungs are faded by depth, which is what sells the "it is standing in the
+   * photograph" effect more than anything else.
+   */
+  _slopeRungs(ctx, u, rungs, model, options) {
+    if (!rungs.length) return;
+    const depths = rungs.map((r) => r.depth);
+    const near = Math.min(...depths);
+    const far = Math.max(...depths);
+    const fade = (d) => {
+      if (far - near < 1e-6) return 1;
+      const k = (d - near) / (far - near);
+      return 1 - 0.55 * k; // never fully transparent
+    };
+
+    // Risers: connect consecutive rungs down the centre of the measurement
+    // plane so the ruler reads as one continuous object.
+    const ordered = [...rungs].sort((a, b) => a.Z - b.Z);
+    for (let i = 1; i < ordered.length; i++) {
+      this._line(ctx, ordered[i - 1].centre, ordered[i].centre, {
+        color: PALETTE.rung,
+        width: 1.4 * u,
+        alpha: 0.35 * fade(ordered[i].depth),
+      });
+    }
+
+    // Labels are culled independently of the rungs. The rungs themselves may
+    // crowd together near the horizon — that reads correctly, like a real
+    // ruler — but overlapping numbers do not, so a label is only drawn once
+    // there is room for it clear of the last one.
+    const minLabelGap = 26 * u;
+    let lastLabel = null;
+
+    for (const r of ordered) {
+      const a = fade(r.depth);
+      const major = r.level.isOrigin;
+      this._line(ctx, r.left, r.right, {
+        color: major ? PALETTE.origin : r.level.isMajor ? PALETTE.rungMajor : PALETTE.rung,
+        width: (major ? 3.4 : r.level.isMajor ? 2.3 : 1.5) * u * (0.6 + 0.4 * a),
+        alpha: major ? 1 : a,
+      });
+
+      if (!options.showLabels) continue;
+      if (!r.level.isMajor && r.screenWidth < 60 * u) continue;
+      const dir = normalize(sub(r.right, r.left));
+      const at = add(r.right, scale(dir, 10 * u));
+      // The origin is the datum: it is always labelled, whatever else is culled.
+      if (!major && lastLabel && dist(at, lastLabel) < minLabelGap) continue;
+      lastLabel = at;
+      const text = options.labelMode === 'change' ? r.level.change : r.level.label;
+      this._label(ctx, text, at, u, {
+        size: major ? 20 : 17,
+        color: major ? PALETTE.origin : PALETTE.text,
+        alpha: Math.max(0.55, a),
+        plate: true,
+        angle: Math.atan2(dir.y, dir.x),
+      });
+    }
+  }
+
+  _staff(ctx, u, rungs, post, model, options) {
+    if (!rungs.length) return;
+    if (post) {
+      this._line(ctx, post.a, post.b, { color: PALETTE.rung, width: 2.4 * u, alpha: 0.8 });
+    }
+    const minStaffGap = 24 * u;
+    let lastStaffLabel = null;
+    for (const r of rungs) {
+      const major = r.level.isOrigin;
+      this._line(ctx, r.left, r.right, {
+        color: major ? PALETTE.origin : r.level.isMajor ? PALETTE.rungMajor : PALETTE.rung,
+        width: (major ? 3.2 : r.level.isMajor ? 2.2 : 1.3) * u,
+        alpha: major ? 1 : r.level.isMajor ? 0.95 : 0.7,
+      });
+      if (!options.showLabels || !r.level.isMajor) continue;
+      const dir = normalize(sub(r.right, r.left));
+      const at = add(r.right, scale(dir, 8 * u));
+      if (!major && lastStaffLabel && dist(at, lastStaffLabel) < minStaffGap) continue;
+      lastStaffLabel = at;
+      const text = options.labelMode === 'change' ? r.level.change : r.level.label;
+      this._label(ctx, text, at, u, {
+        size: major ? 19 : 16,
+        color: major ? PALETTE.origin : PALETTE.text,
+        plate: true,
+        angle: Math.atan2(dir.y, dir.x),
+      });
+    }
+  }
+
+  _lineOfSight(ctx, u, projection, sight, w, h) {
+    // Extend the user's line all the way to the vanishing point: the line of
+    // sight is a direction in the scene, not a segment between two taps.
+    const dir = projection.d;
+    const span = (w + h) * 1.5;
+    const seg = clipSegmentToRect(
+      add(sight.near, scale(dir, -span)),
+      add(sight.near, scale(dir, span)),
+      { x: 0, y: 0, width: w, height: h },
+    );
+    if (seg) {
+      this._line(ctx, seg.a, seg.b, {
+        color: PALETTE.sight,
+        width: 1.8 * u,
+        alpha: 0.65,
+        dash: [16 * u, 10 * u],
+      });
+      // Ride the label down near the camera end of the sight line, where the
+      // scene is emptiest — the middle is where the ruler and the callouts are.
+      const nearEnd = dot(sub(seg.a, seg.b), dir) < 0 ? seg.a : seg.b;
+      const farEnd = nearEnd === seg.a ? seg.b : seg.a;
+      const at = add(nearEnd, scale(sub(farEnd, nearEnd), 0.16));
+      const angle = Math.atan2(dir.y, dir.x);
+      this._label(ctx, 'LINE OF SIGHT', add(at, scale(perp(dir), -14 * u)), u, {
+        size: 14,
+        color: PALETTE.sight,
+        align: 'center',
+        angle: Math.abs(angle) > Math.PI / 2 ? angle + Math.PI : angle,
+      });
+    }
+
+    const vp = sight.vanishing;
+    if (vp.x > -w && vp.x < w * 2 && vp.y > -h && vp.y < h * 2) {
+      this._marker(ctx, vp, u, { color: PALETTE.sight, size: 4, filled: false, ring: true });
+    }
+  }
+
+  _crosshair(ctx, u, projection, w, h) {
+    const c = { x: w / 2, y: h / 2 };
+    const arm = Math.min(w, h) * 0.06;
+    const gap = arm * 0.25;
+    const style = { color: PALETTE.text, width: 1.4 * u, alpha: 0.55 };
+    this._line(ctx, { x: c.x - arm, y: c.y }, { x: c.x - gap, y: c.y }, style);
+    this._line(ctx, { x: c.x + gap, y: c.y }, { x: c.x + arm, y: c.y }, style);
+    this._line(ctx, { x: c.x, y: c.y - arm }, { x: c.x, y: c.y - gap }, style);
+    this._line(ctx, { x: c.x, y: c.y + gap }, { x: c.x, y: c.y + arm }, style);
+  }
+
+  _points(ctx, u, annotations, model, options) {
+    for (const p of annotations.points.values()) {
+      const colour =
+        p.role === 'origin'
+          ? PALETTE.origin
+          : p.role === 'known'
+            ? PALETTE.known
+            : PALETTE.measure;
+      const selected = annotations.selectedId === p.id;
+
+      this._marker(ctx, p.imagePoint, u, {
+        color: colour,
+        size: p.role === 'point' ? 7 : 8.5,
+        ring: selected,
+      });
+
+      if (!options.showLabels) continue;
+
+      const at = add(p.imagePoint, scale(p.labelOffset, u));
+      // Rung numbers always sit off the right-hand end of the ruler, so point
+      // callouts default to the other side. Once the user drags a callout, the
+      // side it ends up on decides how its text is aligned.
+      const align = p.labelOffset.x < 0 ? 'right' : 'left';
+
+      // The measured/projected distinction is what stops an estimate being read
+      // as a survey, so it rides on the name line rather than being an extra
+      // line that could get cropped or overlooked.
+      const tag = !p.valid ? 'NO READING' : p.isMeasured ? 'MEASURED' : 'PROJECTED';
+      const lines = [
+        { text: `${p.label || 'POINT'} · ${tag}`, size: 13, color: p.isMeasured ? PALETTE.origin : colour, weight: '700' },
+      ];
+      if (p.valid) {
+        lines.push({ text: model.formatElevation(p.elevation), size: 19, color: PALETTE.text, weight: '700' });
+        if (p.role !== 'origin') {
+          lines.push({ text: model.formatChange(p.offset), size: 16, color: PALETTE.text, weight: '600' });
+        }
+        if (options.showDistances && p.distance != null) {
+          lines.push({
+            text: `@ ${model.formatNumber(p.distance)}${model.unitSuffix}`,
+            size: 14,
+            color: PALETTE.horizon,
+            weight: '600',
+          });
+        }
+      }
+
+      // Leader line from the marker to its label block.
+      this._line(ctx, p.imagePoint, at, { color: colour, width: 1.2 * u, alpha: 0.6 });
+
+      let y = at.y;
+      for (const line of lines) {
+        const lh = line.size * u * 1.34;
+        this._label(ctx, line.text, { x: at.x, y: y + lh / 2 }, u, {
+          size: line.size,
+          color: line.color,
+          weight: line.weight,
+          align,
+          plate: true,
+        });
+        y += lh;
+      }
+    }
+  }
+
+  _dimensions(ctx, u, annotations, model, projection, originDistance) {
+    const resolved = annotations.resolveDimensions(model, projection, originDistance);
+    for (const r of resolved) {
+      const a = r.a.imagePoint;
+      const b = r.b.imagePoint;
+
+      if (r.dimension.style === 'horizontal') {
+        this._line(ctx, a, b, { color: PALETTE.dimension, width: 1.8 * u, alpha: 0.85 });
+        this._arrowHead(ctx, u, b, normalize(sub(b, a)));
+        this._arrowHead(ctx, u, a, normalize(sub(a, b)));
+      } else {
+        // A vertical dimension is drawn as a true vertical in the scene: from
+        // the lower point straight up to the elevation of the higher one.
+        const lower = r.rise >= 0 ? r.a : r.b;
+        const upper = r.rise >= 0 ? r.b : r.a;
+        const top = projection.projectPlane(upper.offset, lower.distance ?? originDistance);
+        const foot = projection.projectPlane(lower.offset, lower.distance ?? originDistance);
+        if (top && foot) {
+          this._line(ctx, foot, top, { color: PALETTE.dimension, width: 1.8 * u, alpha: 0.9 });
+          this._arrowHead(ctx, u, top, normalize(sub(top, foot)));
+          this._arrowHead(ctx, u, foot, normalize(sub(foot, top)));
+          // Tie line across to the upper point so the reader sees what is being
+          // compared with what.
+          this._line(ctx, top, upper.imagePoint, {
+            color: PALETTE.dimension,
+            width: 1 * u,
+            alpha: 0.5,
+            dash: [6 * u, 6 * u],
+          });
+        }
+      }
+
+      const mid = add(a, scale(sub(b, a), 0.5));
+      this._label(ctx, r.text, add(mid, scale(r.dimension.labelOffset, u)), u, {
+        size: 18,
+        align: 'center',
+        plate: true,
+        weight: '700',
+      });
+    }
+  }
+
+  _arrowHead(ctx, u, at, dir) {
+    const size = 9 * u;
+    const p = perp(dir);
+    const back = sub(at, scale(dir, size));
+    const l = add(back, scale(p, size * 0.42));
+    const r = sub(back, scale(p, size * 0.42));
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(at.x, at.y);
+    ctx.lineTo(l.x, l.y);
+    ctx.lineTo(r.x, r.y);
+    ctx.closePath();
+    ctx.fillStyle = PALETTE.dimension;
+    ctx.strokeStyle = PALETTE.halo;
+    ctx.lineWidth = 2 * u;
+    ctx.stroke();
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+
+// ======================================================================
+// src/ui/ExportManager.js
+// ======================================================================
+// ExportManager.js
+//
+// Composites the photograph and the overlay into a NEW canvas at the
+// photograph's own resolution. The source image is only ever read from, so the
+// original is untouched no matter how many times you export.
+//
+// A caption strip is appended below the picture carrying the calibration the
+// drawing was made with, plus the accuracy caveat, so an exported image cannot
+// be mistaken for a survey.
+
+class ExportManager {
+  constructor(renderer) {
+    this.renderer = renderer;
+  }
+
+  /**
+   * @returns {HTMLCanvasElement}
+   */
+  compose(scene, { image, caption = true, maxEdge = 4096 } = {}) {
+    const iw = scene.imageWidth;
+    const ih = scene.imageHeight;
+
+    // Very large photographs are downscaled so the export cannot blow up
+    // memory on an iPad, but the overlay is drawn at the same scale so nothing
+    // shifts relative to the picture.
+    const fit = Math.min(1, maxEdge / Math.max(iw, ih));
+    const w = Math.round(iw * fit);
+    const h = Math.round(ih * fit);
+
+    const u = w / 1000;
+    const lineHeight = 26 * u;
+    const pad = 20 * u;
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    // Wrap the caption before sizing the canvas, so a long line can never run
+    // off the edge of the exported picture.
+    const lines = caption
+      ? this._wrapCaption(ctx, this._captionLines(scene), w - pad * 2, u)
+      : [];
+    const stripHeight = lines.length ? pad * 2 + lineHeight * lines.length : 0;
+
+    canvas.width = w;
+    canvas.height = h + Math.round(stripHeight);
+
+    ctx.fillStyle = '#0b1016';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.save();
+    ctx.scale(fit, fit);
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(image, 0, 0, iw, ih);
+    this.renderer.draw(ctx, scene);
+    ctx.restore();
+
+    if (lines.length) this._caption(ctx, lines, { x: 0, y: h, w, u, pad, lineHeight });
+    return canvas;
+  }
+
+  _captionLines(scene) {
+    const { model, solution, options, originDistance } = scene;
+    const n = (v) => model.formatNumber(v);
+    return [
+      `PERSPECTIVE ELEVATION RULER — line-of-sight measurement plane only`,
+      `Origin ${model.formatElevation(model.originElevation)} · Point B ${model.formatElevation(
+        model.knownElevation,
+      )} · Horizontal distance ${n(model.horizontalDistance)}${model.unitSuffix} · Grade ${model.formatGrade()}`,
+      `Increment ${n(model.increment)}${model.unitSuffix} · Range ±${n(model.range)}${
+        model.unitSuffix
+      } · Camera height ${n(solution.cameraHeight)}${model.unitSuffix} · Origin distance ${n(
+        originDistance,
+      )}${model.unitSuffix} · FOV ${Math.round(options.fovDeg)}°`,
+      `Visual estimate, not a survey. Elevations are valid along the line of sight shown, not across the whole photograph.`,
+    ];
+  }
+
+  /** Font for a caption line, given which of the original rows it came from. */
+  _captionFont(u, row) {
+    return `${row === 0 ? '700' : '400'} ${(row === 0 ? 17 : 15) * u}px ui-monospace, "SF Mono", Menlo, Consolas, monospace`;
+  }
+
+  /** Greedy word wrap, keeping each fragment tagged with its source row. */
+  _wrapCaption(ctx, rows, maxWidth, u) {
+    const out = [];
+    rows.forEach((text, row) => {
+      ctx.font = this._captionFont(u, row);
+      const words = text.split(' ');
+      let line = '';
+      for (const word of words) {
+        const next = line ? `${line} ${word}` : word;
+        if (line && ctx.measureText(next).width > maxWidth) {
+          out.push({ text: line, row });
+          line = word;
+        } else {
+          line = next;
+        }
+      }
+      if (line) out.push({ text: line, row });
+    });
+    return out;
+  }
+
+  _caption(ctx, lines, { x, y, w, u, pad, lineHeight }) {
+    ctx.save();
+    ctx.fillStyle = '#0b1016';
+    ctx.fillRect(x, y, w, pad * 2 + lineHeight * lines.length);
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+    ctx.lineWidth = Math.max(1, u);
+    ctx.beginPath();
+    ctx.moveTo(x, y + 0.5);
+    ctx.lineTo(x + w, y + 0.5);
+    ctx.stroke();
+
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    const lastRow = lines.length ? lines[lines.length - 1].row : 0;
+    lines.forEach(({ text, row }, i) => {
+      ctx.font = this._captionFont(u, row);
+      ctx.fillStyle =
+        row === 0 ? '#8fe9ff' : row === lastRow ? 'rgba(255,255,255,0.62)' : 'rgba(255,255,255,0.86)';
+      ctx.fillText(text, x + pad, y + pad + lineHeight * (i + 0.5));
+    });
+    ctx.restore();
+  }
+
+  toBlob(canvas, type = 'image/png', quality = 0.94) {
+    return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+  }
+
+  /**
+   * Hand the finished image to the user. On iPadOS the share sheet is the only
+   * route that reaches "Save Image", so try that first and fall back to a
+   * download link (and finally to opening the image in a new tab).
+   */
+  async deliver(canvas, filename = 'elevation-ruler.png') {
+    const blob = await this.toBlob(canvas);
+    if (!blob) throw new Error('Could not encode the image.');
+
+    const file = new File([blob], filename, { type: 'image/png' });
+    if (navigator.canShare?.({ files: [file] }) && navigator.share) {
+      try {
+        await navigator.share({ files: [file], title: 'Perspective Elevation Ruler' });
+        return 'shared';
+      } catch (err) {
+        if (err?.name === 'AbortError') return 'cancelled';
+        // fall through to download
+      }
+    }
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    return 'downloaded';
+  }
+}
+
+
+// ======================================================================
+// src/ui/App.js
+// ======================================================================
+// App.js
+//
+// The controller. It owns the state, drives the calibration, and keeps the DOM
+// and the canvas in step. All of the mathematics lives in src/core — this file
+// only decides *when* to ask for it.
+
+
+
+
+
+
+
+
+
+const STORAGE_KEY = 'perspective-elevation-ruler/v1';
+
+const STEP_TEXT = {
+  1: ['STEP 1', 'Take or choose a photograph looking across the slope.'],
+  2: ['STEP 2', 'Tap the <strong>origin</strong> — the point whose elevation you know.'],
+  3: ['STEP 3', 'Tap <strong>Point B</strong>, farther along the same sight line.'],
+  4: ['STEP 4', 'Check the <strong>line of sight</strong>. Drag either point to re-aim it.'],
+  5: ['STEP 5', 'Fine-tune until the ruler sits on the ground, then measure.'],
+};
+
+class App {
+  constructor(root = document) {
+    this.$ = (id) => root.getElementById(id);
+
+    this.state = {
+      originElevation: 100,
+      knownElevation: 103,
+      horizontalDistance: 40,
+      increment: 1,
+      range: 10,
+      unit: 'ft',
+      fovDeg: 60,
+      solveMode: 'height',
+      solveValue: 5.5,
+      rulerStyle: 'slope',
+      rungWidth: 10,
+      staffDistance: null,
+      opacity: 1,
+      showRuler: true,
+      showLabels: true,
+      showSight: true,
+      showHorizon: true,
+      showCrosshair: false,
+      showDistances: false,
+      labelMode: 'elevation',
+      tool: 'select',
+      step: 1,
+    };
+
+    this.image = null;
+    this.imageDataUrl = null;
+    this.annotations = new AnnotationManager();
+    this.renderer = new OverlayRenderer();
+    this.exporter = new ExportManager(this.renderer);
+    this.projection = null;
+    this.solution = null;
+    this.model = this._buildModel();
+    this.ruler = null;
+    this.calibrationError = null;
+    this.selectionQueue = [];
+    this.drag = null;
+    this._snapNoticeShown = false;
+
+    this._buildView();
+    this._bindControls();
+    this._restore();
+    this._syncControls();
+    this._recalculate();
+    this._updateStep();
+  }
+
+  // ======================================================================
+  // Wiring
+  // ======================================================================
+
+  _buildView() {
+    this.view = new PhotoView(this.$('photo-canvas'), {
+      onPointerDown: (p, e) => this._pointerDown(p, e),
+      onPointerMove: (p, e) => this._pointerMove(p, e),
+      onPointerUp: (p, e) => this._pointerUp(p, e),
+    });
+    this.view.drawOverlay = (ctx) => this._drawOverlay(ctx);
+
+    const resize = () => this.view.resize();
+    window.addEventListener('resize', resize);
+    window.addEventListener('orientationchange', () => setTimeout(resize, 220));
+    requestAnimationFrame(resize);
+
+    this.$('zoom-in').onclick = () => this.view.zoomBy(1.4);
+    this.$('zoom-out').onclick = () => this.view.zoomBy(1 / 1.4);
+    this.$('zoom-fit').onclick = () => this.view.fit(12);
+  }
+
+  _bindControls() {
+    const $ = this.$;
+
+    // --- photograph -------------------------------------------------------
+    const camera = $('file-camera');
+    const library = $('file-library');
+    camera.onchange = (e) => this._loadFile(e.target.files?.[0]);
+    library.onchange = (e) => this._loadFile(e.target.files?.[0]);
+    const take = () => camera.click();
+    const choose = () => library.click();
+    $('btn-take').onclick = take;
+    $('btn-choose').onclick = choose;
+    $('empty-take').onclick = take;
+    $('empty-choose').onclick = choose;
+
+    // --- drawer -----------------------------------------------------------
+    $('drawer-toggle').onclick = () => this._setDrawer(true);
+    $('panel-close').onclick = () => this._setDrawer(false);
+
+    // --- reference points -------------------------------------------------
+    $('btn-set-origin').onclick = () => this._arm('origin');
+    $('btn-set-known').onclick = () => this._arm('known');
+
+    this._numberField('in-origin-elev', 'originElevation');
+    this._numberField('in-known-elev', 'knownElevation');
+    this._numberField('in-distance', 'horizontalDistance', (v) => (v > 0 ? v : null));
+
+    // --- calibration ------------------------------------------------------
+    $('in-fov').oninput = (e) => {
+      this.state.fovDeg = Number(e.target.value);
+      $('out-fov').textContent = `${this.state.fovDeg}°`;
+      this._recalculate();
+    };
+
+    $('in-solve-mode').onchange = (e) => {
+      this.state.solveMode = e.target.value;
+      // Carry the current geometry across so nothing jumps when the mode flips.
+      if (this.solution) {
+        this.state.solveValue =
+          this.state.solveMode === 'height'
+            ? this.solution.cameraHeight
+            : this.state.solveMode === 'distance'
+              ? this.solution.originDistance
+              : this.solution.pitchRad * RAD;
+      }
+      this._syncSolveSlider();
+      this._recalculate();
+    };
+
+    $('in-solve').oninput = (e) => {
+      this.state.solveValue = Number(e.target.value);
+      this._recalculate();
+    };
+
+    // --- ruler ------------------------------------------------------------
+    $('in-increment').onchange = (e) => {
+      this.state.increment = Number(e.target.value);
+      this._recalculate();
+    };
+    $('in-range').oninput = (e) => {
+      this.state.range = Number(e.target.value);
+      $('out-range').textContent = `±${this.state.range}${this._suffix}`;
+      this._recalculate();
+    };
+    $('in-style').onchange = (e) => {
+      this.state.rulerStyle = e.target.value;
+      this._syncStyleFields();
+      this._recalculate();
+    };
+    $('in-rung-width').oninput = (e) => {
+      this.state.rungWidth = Number(e.target.value);
+      $('out-rung-width').textContent = `${this.state.rungWidth}${this._suffix}`;
+      this._recalculate();
+    };
+    $('in-staff-distance').oninput = (e) => {
+      this.state.staffDistance = Number(e.target.value);
+      $('out-staff-distance').textContent = `${this.state.staffDistance}${this._suffix}`;
+      this._recalculate();
+    };
+    $('in-label-mode').onchange = (e) => {
+      this.state.labelMode = e.target.value;
+      this._recalculate();
+    };
+
+    // --- display ----------------------------------------------------------
+    $('in-opacity').oninput = (e) => {
+      this.state.opacity = Number(e.target.value) / 100;
+      $('out-opacity').textContent = `${e.target.value}%`;
+      this.view.render();
+      this._persist();
+    };
+    const toggle = (id, key) => {
+      $(id).onchange = (e) => {
+        this.state[key] = e.target.checked;
+        this.view.render();
+        this._persist();
+      };
+    };
+    toggle('tg-ruler', 'showRuler');
+    toggle('tg-labels', 'showLabels');
+    toggle('tg-sight', 'showSight');
+    toggle('tg-horizon', 'showHorizon');
+    toggle('tg-crosshair', 'showCrosshair');
+    toggle('tg-distances', 'showDistances');
+
+    $('in-units').onchange = (e) => {
+      this.state.unit = e.target.value;
+      this._recalculate();
+      this._syncControls();
+    };
+
+    // --- measurements -----------------------------------------------------
+    $('btn-dim-vertical').onclick = () => this._addDimension('vertical');
+    $('btn-dim-horizontal').onclick = () => this._addDimension('horizontal');
+    $('btn-dim-grade').onclick = () => this._addDimension('grade');
+    $('btn-clear-points').onclick = () => {
+      this.annotations.clearMeasurements();
+      this.selectionQueue = [];
+      this._recalculate();
+    };
+
+    // --- actions ----------------------------------------------------------
+    $('btn-calibrate').onclick = () => this._startCalibration();
+    $('btn-add-point').onclick = () => this._arm('add');
+    $('btn-reset').onclick = () => this._reset();
+    $('btn-export').onclick = () => this._export();
+  }
+
+  /** A text field that parses a number and rejects nonsense without nagging. */
+  _numberField(id, key, validate = (v) => v) {
+    const el = this.$(id);
+    const commit = () => {
+      const parsed = Number.parseFloat(String(el.value).replace(/[^0-9.+-]/g, ''));
+      const value = Number.isFinite(parsed) ? validate(parsed) : null;
+      if (value == null) {
+        el.value = this._fmt(this.state[key]);
+        return;
+      }
+      this.state[key] = value;
+      el.value = this._fmt(value);
+      const ref = key === 'originElevation' ? 'origin' : key === 'knownElevation' ? 'known' : null;
+      if (ref) {
+        const point = this.annotations.referencePoint(ref);
+        if (point) point.elevation = value;
+      }
+      this._recalculate();
+    };
+    el.onchange = commit;
+    el.onblur = commit;
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') el.blur();
+    });
+  }
+
+  get _suffix() {
+    return this.state.unit === 'm' ? 'm' : "'";
+  }
+
+  _fmt(v) {
+    return Number(v).toFixed(2);
+  }
+
+  // ======================================================================
+  // Photograph
+  // ======================================================================
+
+  async _loadFile(file) {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      this._toast('That file is not an image.', true);
+      return;
+    }
+    try {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.decoding = 'async';
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = () => reject(new Error('The image could not be decoded.'));
+        img.src = url;
+      });
+      // Modern Safari and Chrome apply EXIF orientation to <img> by default, so
+      // what we draw matches what the user saw in Photos.
+      this._setImage(img);
+      URL.revokeObjectURL(url);
+      this.imageDataUrl = await this._toDataUrl(file);
+      this._persist();
+    } catch (err) {
+      this._toast(err.message ?? 'Could not open that photograph.', true);
+    }
+  }
+
+  _setImage(img) {
+    this.image = img;
+    this.view.setImage(img);
+    this.$('empty-state').hidden = true;
+    this.$('hud').hidden = false;
+    this.$('zoom-cluster').hidden = false;
+    this.$('plane-note').hidden = false;
+    this.$('photo-info').textContent =
+      `${img.naturalWidth} × ${img.naturalHeight} px. Tap the origin to begin.`;
+    // A fresh photograph invalidates the old geometry.
+    this.annotations.clear();
+    this.selectionQueue = [];
+    this.state.step = 2;
+    this._arm('origin');
+    this._recalculate();
+  }
+
+  _toDataUrl(file) {
+    // Only worth keeping if it will actually fit in local storage.
+    if (file.size > 5.5 * 1024 * 1024) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      const r = new FileReader();
+      r.onload = () => resolve(typeof r.result === 'string' ? r.result : null);
+      r.onerror = () => resolve(null);
+      r.readAsDataURL(file);
+    });
+  }
+
+  // ======================================================================
+  // Tools and pointer handling
+  // ======================================================================
+
+  _arm(tool) {
+    this.state.tool = tool;
+    for (const [id, name] of [
+      ['btn-set-origin', 'origin'],
+      ['btn-set-known', 'known'],
+      ['btn-add-point', 'add'],
+    ]) {
+      this.$(id).classList.toggle('is-armed', tool === name);
+    }
+    if (tool !== 'select') {
+      this._setDrawer(false);
+      if (tool === 'origin') this.state.step = 2;
+      if (tool === 'known') this.state.step = 3;
+    }
+    this._updateStep();
+  }
+
+  /**
+   * Where a callout sits by default: clear of the sight line, on the opposite
+   * side from the rung numbers, which always run off the right-hand end of the
+   * ruler. Callouts the user has dragged are left alone.
+   */
+  _defaultLabelOffset() {
+    if (!this.projection) return { x: 20, y: -26 };
+    const n = this.projection.n; // image direction of world +X
+    return { x: -n.x * 34 - 4, y: -n.y * 34 - 14 };
+  }
+
+  /**
+   * Lay the callouts out so they do not bury each other. Points that are far
+   * apart on the slope can still project within a few pixels of one another
+   * near the horizon, so a fixed stagger is not enough: the blocks are sorted
+   * down the image and each is pushed clear of the one above it.
+   *
+   * Callouts the user has dragged are fixed points that the others flow around.
+   */
+  _relayoutLabels() {
+    if (!this.projection) return;
+    const unit = this.view.imageWidth / 1000;
+    const off = this._defaultLabelOffset();
+    const gap = 8 * unit;
+
+    const blocks = [];
+    for (const p of this.annotations.points.values()) {
+      // Name line, elevation, and (except at the origin) the change.
+      const rows = p.role === 'origin' ? 2 : 3;
+      const height = (13 * 1.34 + 19 * 1.34 + (rows > 2 ? 16 * 1.34 : 0)) * unit;
+      const top = p.imagePoint.y + (p.labelMoved ? p.labelOffset.y : off.y) * unit;
+      blocks.push({ point: p, height, top });
+    }
+    blocks.sort((a, b) => a.top - b.top);
+
+    let floor = -Infinity;
+    for (const b of blocks) {
+      if (b.point.labelMoved) {
+        floor = Math.max(floor, b.top + b.height + gap);
+        continue;
+      }
+      const top = Math.max(b.top, floor);
+      b.point.labelOffset = { x: off.x, y: (top - b.point.imagePoint.y) / unit };
+      floor = top + b.height + gap;
+    }
+  }
+
+  /** Constrain a point onto the line of sight — the only place a reading is valid. */
+  _snapToSight(p) {
+    if (!this.projection) return p;
+    const { t } = this.projection.toLineCoords(p);
+    return this.projection.fromLineCoords(t);
+  }
+
+  _pointerDown(p, e) {
+    if (!this.image) return false;
+    const tol = this.view.photoTolerance(30);
+
+    if (this.state.tool === 'origin') {
+      this.annotations.setReferencePoint('origin', p, this.state.originElevation, this._defaultLabelOffset());
+      this._arm(this.annotations.known ? 'select' : 'known');
+      this._recalculate();
+      this.drag = { id: this.annotations.origin.id, reference: true };
+      return true;
+    }
+    if (this.state.tool === 'known') {
+      this.annotations.setReferencePoint('known', p, this.state.knownElevation, this._defaultLabelOffset());
+      this._arm('select');
+      this.state.step = 4;
+      this._recalculate();
+      this.drag = { id: this.annotations.known.id, reference: true };
+      return true;
+    }
+    if (this.state.tool === 'add') {
+      if (!this.projection) {
+        this._toast('Set both known points first.', true);
+        return false;
+      }
+      const snapped = this._snapToSight(p);
+      if (!this._snapNoticeShown && dist(snapped, p) > tol * 0.7) {
+        this._toast('Measurement points snap to the line of sight.');
+        this._snapNoticeShown = true;
+      }
+      const point = this.annotations.addPoint({
+        imagePoint: snapped,
+        label: `POINT ${String.fromCharCode(67 + this.annotations.measurements.length)}`,
+        labelOffset: this._defaultLabelOffset(),
+      });
+      this._select(point.id);
+      this._arm('select');
+      this._recalculate();
+      this.drag = { id: point.id };
+      return true;
+    }
+
+    // Labels are checked before the markers, so a label sitting over a point
+    // can still be picked up and moved out of the way.
+    const unit = this.view.imageWidth / 1000;
+    const dimHit = this.annotations.hitTestDimension(p, tol, unit);
+    if (dimHit) {
+      const anchor = this.annotations.dimensionAnchor(dimHit, unit);
+      this.drag = {
+        dimension: dimHit.id,
+        grab: { x: (p.x - anchor.x) / unit, y: (p.y - anchor.y) / unit },
+      };
+      return true;
+    }
+
+    const labelHit = this.annotations.hitTestLabel(p, tol, unit);
+    if (labelHit) {
+      this._select(labelHit.id);
+      this.drag = {
+        id: labelHit.id,
+        label: true,
+        grab: {
+          x: (p.x - labelHit.imagePoint.x) / unit - labelHit.labelOffset.x,
+          y: (p.y - labelHit.imagePoint.y) / unit - labelHit.labelOffset.y,
+        },
+      };
+      this.view.render();
+      return true;
+    }
+
+    // Select / drag an existing point.
+    const hit = this.annotations.hitTest(p, tol);
+    if (hit) {
+      this._select(hit.id);
+      this.drag = { id: hit.id, reference: hit.isMeasured };
+      this.view.render();
+      return true;
+    }
+    return false; // let the view pan
+  }
+
+  _pointerMove(p) {
+    if (!this.drag) return;
+    if (this.drag.dimension) {
+      this.annotations.moveDimensionLabel(
+        this.drag.dimension,
+        p,
+        this.view.imageWidth / 1000,
+        this.drag.grab,
+      );
+      this.view.render();
+      return;
+    }
+    const point = this.annotations.points.get(this.drag.id);
+    if (!point) return;
+    if (this.drag.label) {
+      this.annotations.moveLabel(this.drag.id, p, this.view.imageWidth / 1000, this.drag.grab);
+      this.view.render();
+      return;
+    }
+    const target = this.drag.reference ? p : this._snapToSight(p);
+    this.annotations.movePoint(this.drag.id, target);
+    // Moving a reference point re-aims the line of sight, so the whole camera
+    // has to be re-solved — that is the "adjust the line of sight" control.
+    this._recalculate({ quiet: true });
+  }
+
+  _pointerUp() {
+    if (!this.drag) return;
+    this.drag = null;
+    this._recalculate();
+  }
+
+  _select(id) {
+    this.annotations.select(id);
+    this.selectionQueue = [id, ...this.selectionQueue.filter((x) => x !== id)].slice(0, 2);
+    this._syncDimensionButtons();
+    this._updateReadout();
+  }
+
+  // ======================================================================
+  // Calibration
+  // ======================================================================
+
+  _buildModel() {
+    return new ElevationModel({
+      originElevation: this.state.originElevation,
+      knownElevation: this.state.knownElevation,
+      horizontalDistance: this.state.horizontalDistance,
+      increment: this.state.increment,
+      range: this.state.range,
+      unitSuffix: this.state.unit === 'm' ? 'm' : "'",
+    });
+  }
+
+  /**
+   * The single point where everything is brought back into agreement: rebuild
+   * the model, re-solve the camera, re-derive every annotation, redraw.
+   */
+  _recalculate({ quiet = false } = {}) {
+    this.model = this._buildModel();
+
+    const origin = this.annotations.origin;
+    const known = this.annotations.known;
+    this.projection = null;
+    this.solution = null;
+    this.ruler = null;
+    this.calibrationError = null;
+
+    if (this.image && origin && known) {
+      const result = calibrate({
+        imageWidth: this.view.imageWidth,
+        imageHeight: this.view.imageHeight,
+        fovDeg: this.state.fovDeg,
+        originPoint: origin.imagePoint,
+        knownPoint: known.imagePoint,
+        originElevation: this.state.originElevation,
+        knownElevation: this.state.knownElevation,
+        horizontalDistance: this.state.horizontalDistance,
+        mode: this.state.solveMode,
+        value: this.state.solveMode === 'pitch' ? this.state.solveValue * DEG : this.state.solveValue,
+      });
+
+      if (result.ok) {
+        this.projection = result.projection;
+        this.solution = result.solution;
+        this.context = result.context;
+        this.ruler = new ElevationRuler({
+          projection: this.projection,
+          model: this.model,
+          originDistance: this.solution.originDistance,
+          rungWidth: this.state.rungWidth,
+        });
+        if (this.state.step < 5) this.state.step = 5;
+      } else {
+        this.calibrationError = result.reason;
+      }
+    }
+
+    this._relayoutLabels();
+    this.annotations.solveAll(this.projection, this.model, this.solution?.originDistance ?? 0);
+    if (!quiet) this._syncSolveSlider();
+    this._syncDerived();
+    this._syncPointList();
+    this._updateReadout();
+    this._updateStep();
+    this.view.render();
+    if (!quiet) this._persist();
+  }
+
+  /**
+   * Work out what the fine-tune slider can reach for the current mode by
+   * sampling the camera solutions that actually exist for this photograph.
+   */
+  _solveDomain() {
+    const mode = this.state.solveMode;
+    if (!this.context) return null;
+    const ctx = this.context;
+    const lo = Math.max(ctx.alphaA, ctx.alphaB) - Math.PI / 2 + 1e-4;
+    const hi = Math.min(ctx.alphaA, ctx.alphaB) + Math.PI / 2 - 1e-4;
+    if (!(hi > lo)) return null;
+
+    // Slider values are snapped onto a hundredths grid so the user can land on
+    // round numbers — a range input can only reach min + k*step, so an
+    // arbitrary float minimum would put 6.00 ft permanently out of reach.
+    const grid = (rawMin, rawMax, step) => {
+      const q = 1 / step;
+      const min = Math.floor(rawMin * q) / q;
+      const max = Math.ceil(rawMax * q) / q;
+      return max > min ? { min, max, step } : null;
+    };
+
+    if (mode === 'pitch') {
+      return grid(lo * RAD, hi * RAD, 0.01);
+    }
+
+    // Practical windows keep the slider usable: the true domain runs off to
+    // infinity as the sight line approaches the horizon.
+    const window = mode === 'height' ? [-20, 150] : [0.5, 1500];
+    const values = [];
+    const N = 900;
+    for (let i = 0; i <= N; i++) {
+      const sol = solveFromPitch(lo + ((hi - lo) * i) / N, ctx);
+      if (!sol) continue;
+      const v = mode === 'height' ? sol.cameraHeight : sol.originDistance;
+      if (v >= window[0] && v <= window[1]) values.push(v);
+    }
+    if (values.length < 2) return null;
+    const rawMin = Math.min(...values);
+    const rawMax = Math.max(...values);
+    // A coarse step over a long span would make the slider jump; a fine step
+    // over a short one keeps fine-tuning usable. Both stay on a decimal grid.
+    const step = rawMax - rawMin > 400 ? 0.1 : 0.01;
+    return grid(rawMin, rawMax, step);
+  }
+
+  _syncSolveSlider() {
+    const slider = this.$('in-solve');
+    const domain = this._solveDomain();
+    const mode = this.state.solveMode;
+
+    const labels = {
+      height: ['Camera height', 'How high the camera was above the origin.'],
+      distance: ['Line-of-sight distance', 'How far the origin was from the camera.'],
+      pitch: ['Viewing angle', 'Tilt below horizontal. Moves the horizon and the vanishing point.'],
+    };
+    const [name, hint] = labels[mode];
+
+    if (!domain) {
+      slider.disabled = true;
+      this.$('lbl-solve').innerHTML = `${name} <em id="out-solve">—</em>`;
+      this.$('hint-solve').textContent = hint;
+      return;
+    }
+
+    slider.disabled = false;
+    slider.min = domain.min;
+    slider.max = domain.max;
+    slider.step = domain.step;
+
+    const current =
+      this.solution == null
+        ? this.state.solveValue
+        : mode === 'height'
+          ? this.solution.cameraHeight
+          : mode === 'distance'
+            ? this.solution.originDistance
+            : this.solution.pitchRad * RAD;
+    this.state.solveValue = clamp(current, domain.min, domain.max);
+    slider.value = String(this.state.solveValue);
+
+    const shown =
+      mode === 'pitch'
+        ? `${this.state.solveValue.toFixed(1)}°`
+        : `${this.state.solveValue.toFixed(2)}${this._suffix}`;
+    this.$('lbl-solve').innerHTML = `${name} <em>${shown}</em>`;
+    this.$('hint-solve').textContent = hint;
+  }
+
+  _startCalibration() {
+    if (!this.image) {
+      this._toast('Load a photograph first.');
+      this.$('file-library').click();
+      return;
+    }
+    this._setDrawer(false);
+    this._arm('origin');
+    this._toast('Tap the origin, then tap Point B.');
+  }
+
+  // ======================================================================
+  // Rendering
+  // ======================================================================
+
+  _scene() {
+    if (!this.projection || !this.ruler || !this.solution) return null;
+    return {
+      projection: this.projection,
+      model: this.model,
+      ruler: this.ruler,
+      annotations: this.annotations,
+      solution: this.solution,
+      originDistance: this.solution.originDistance,
+      imageWidth: this.view.imageWidth,
+      imageHeight: this.view.imageHeight,
+      options: {
+        opacity: this.state.opacity,
+        showRuler: this.state.showRuler,
+        showLabels: this.state.showLabels,
+        showSight: this.state.showSight,
+        showHorizon: this.state.showHorizon,
+        showCrosshair: this.state.showCrosshair,
+        showDistances: this.state.showDistances,
+        rulerStyle: this.state.rulerStyle,
+        labelMode: this.state.labelMode,
+        staffDistance: this.state.staffDistance,
+        fovDeg: this.state.fovDeg,
+      },
+    };
+  }
+
+  _drawOverlay(ctx) {
+    const scene = this._scene();
+    if (scene) {
+      this.renderer.draw(ctx, scene);
+      return;
+    }
+    // Not calibrated yet — still show whichever reference points exist so the
+    // user can see what they have placed.
+    const u = this.view.imageWidth / 1000;
+    for (const p of this.annotations.points.values()) {
+      const colour = p.role === 'origin' ? '#3ddc84' : p.role === 'known' ? '#ffa726' : '#ff5cae';
+      this.renderer._marker(ctx, p.imagePoint, u, { color: colour, size: 8.5 });
+      this.renderer._label(
+        ctx,
+        p.label || 'POINT',
+        add(p.imagePoint, scale({ x: 18, y: -18 }, u)),
+        u,
+        { size: 18, plate: true, weight: '700' },
+      );
+    }
+    if (this.annotations.origin && this.annotations.known) {
+      this.renderer._line(ctx, this.annotations.origin.imagePoint, this.annotations.known.imagePoint, {
+        color: '#ffb300',
+        width: 1.8 * u,
+        alpha: 0.7,
+        dash: [16 * u, 10 * u],
+      });
+    }
+  }
+
+  // ======================================================================
+  // DOM sync
+  // ======================================================================
+
+  _syncControls() {
+    const s = this.state;
+    const $ = this.$;
+    $('in-origin-elev').value = this._fmt(s.originElevation);
+    $('in-known-elev').value = this._fmt(s.knownElevation);
+    $('in-distance').value = this._fmt(s.horizontalDistance);
+    $('in-fov').value = String(s.fovDeg);
+    $('out-fov').textContent = `${s.fovDeg}°`;
+    $('in-solve-mode').value = s.solveMode;
+    $('in-increment').value = String(s.increment);
+    $('in-range').value = String(s.range);
+    $('out-range').textContent = `±${s.range}${this._suffix}`;
+    $('in-style').value = s.rulerStyle;
+    $('in-rung-width').value = String(s.rungWidth);
+    $('out-rung-width').textContent = `${s.rungWidth}${this._suffix}`;
+    $('in-label-mode').value = s.labelMode;
+    $('in-opacity').value = String(Math.round(s.opacity * 100));
+    $('out-opacity').textContent = `${Math.round(s.opacity * 100)}%`;
+    $('in-units').value = s.unit;
+    $('tg-ruler').checked = s.showRuler;
+    $('tg-labels').checked = s.showLabels;
+    $('tg-sight').checked = s.showSight;
+    $('tg-horizon').checked = s.showHorizon;
+    $('tg-crosshair').checked = s.showCrosshair;
+    $('tg-distances').checked = s.showDistances;
+    this._syncStyleFields();
+  }
+
+  _syncStyleFields() {
+    const staff = this.state.rulerStyle !== 'slope' || this.model.isFlat;
+    this.$('wrap-staff-distance').hidden = !staff;
+    this.$('wrap-rung-width').hidden = this.state.rulerStyle === 'staff';
+    if (staff && this.solution) {
+      const slider = this.$('in-staff-distance');
+      const maxD = Math.max(10, this.solution.originDistance * 4);
+      slider.min = '1';
+      slider.max = String(Math.round(maxD));
+      slider.step = '0.5';
+      const value = this.state.staffDistance ?? this.solution.originDistance;
+      slider.value = String(clamp(value, 1, maxD));
+      this.$('out-staff-distance').textContent = `${Number(slider.value).toFixed(1)}${this._suffix}`;
+    }
+  }
+
+  _syncDerived() {
+    const m = this.model;
+    this.$('out-delta').textContent = m.formatChange(m.deltaElevation);
+    this.$('out-grade').textContent = m.isFlat ? 'Level' : m.formatGrade();
+
+    this.$('ref-origin').classList.toggle('is-set', !!this.annotations.origin);
+    this.$('ref-known').classList.toggle('is-set', !!this.annotations.known);
+    this.$('btn-set-origin').textContent = this.annotations.origin ? 'Move' : 'Tap on photo';
+    this.$('btn-set-known').textContent = this.annotations.known ? 'Move' : 'Tap on photo';
+
+    const set = (id, text) => {
+      this.$(id).textContent = text;
+    };
+    if (this.solution) {
+      set('out-cam-h', `${m.formatNumber(this.solution.cameraHeight)}${this._suffix}`);
+      set('out-pitch', `${(this.solution.pitchRad * RAD).toFixed(1)}° down`);
+      set('out-origin-d', `${m.formatNumber(this.solution.originDistance)}${this._suffix}`);
+      set('out-focal', `${Math.round(this.projection.focalPx)} px`);
+    } else {
+      for (const id of ['out-cam-h', 'out-pitch', 'out-origin-d', 'out-focal']) set(id, '—');
+    }
+
+    const warn = this.$('cal-warning');
+    if (this.calibrationError) {
+      warn.textContent = this.calibrationError;
+      warn.hidden = false;
+    } else if (this.model.isFlat && this.annotations.known) {
+      warn.textContent =
+        'Both known points are at the same elevation, so the grade is level. The ruler is shown as a levelling staff instead of a staircase.';
+      warn.hidden = false;
+    } else {
+      warn.hidden = true;
+    }
+    this._syncStyleFields();
+  }
+
+  _syncPointList() {
+    const list = this.$('point-list');
+    const points = this.annotations.measurements;
+    list.textContent = '';
+    if (!points.length) {
+      const p = document.createElement('p');
+      p.className = 'hint empty-list';
+      p.textContent = 'No measurement points yet.';
+      list.append(p);
+      this._syncDimensionButtons();
+      return;
+    }
+    for (const point of points) {
+      const row = document.createElement('div');
+      row.className = 'point-row';
+      row.classList.toggle('is-selected', this.annotations.selectedId === point.id);
+
+      const swatch = document.createElement('span');
+      swatch.className = 'swatch';
+
+      const name = document.createElement('span');
+      name.className = 'pt-name';
+      name.textContent = point.label || 'Point';
+
+      const value = document.createElement('span');
+      value.className = 'pt-val';
+      value.textContent = point.valid ? this.model.formatElevation(point.elevation) : '—';
+
+      const del = document.createElement('button');
+      del.className = 'pt-del';
+      del.textContent = '✕';
+      del.setAttribute('aria-label', `Delete ${point.label}`);
+      del.onclick = (e) => {
+        e.stopPropagation();
+        this.annotations.removePoint(point.id);
+        this.selectionQueue = this.selectionQueue.filter((x) => x !== point.id);
+        this._recalculate();
+      };
+
+      row.onclick = () => {
+        this._select(point.id);
+        this._syncPointList();
+        this.view.render();
+      };
+
+      row.append(swatch, name, value, del);
+      list.append(row);
+    }
+    this._syncDimensionButtons();
+  }
+
+  _syncDimensionButtons() {
+    const ready = this.selectionQueue.length === 2;
+    for (const id of ['btn-dim-vertical', 'btn-dim-horizontal', 'btn-dim-grade']) {
+      this.$(id).disabled = !ready;
+    }
+    this.$('dim-hint').textContent = ready
+      ? 'Dimension will be drawn between the last two points you selected.'
+      : 'Select two points to draw a dimension between them.';
+  }
+
+  _addDimension(style) {
+    if (this.selectionQueue.length !== 2) return;
+    const [b, a] = this.selectionQueue;
+    const added = this.annotations.addDimension(a, b, style);
+    if (!added) {
+      this._toast('Those two points cannot be dimensioned.', true);
+      return;
+    }
+    this._recalculate();
+    this._toast('Dimension added.');
+  }
+
+  _updateReadout() {
+    const box = this.$('readout');
+    const point = this.annotations.selected;
+    if (!point || !this.model) {
+      box.hidden = true;
+      return;
+    }
+    box.hidden = false;
+    const m = this.model;
+    this.$('readout-elev').textContent = point.valid ? m.formatElevation(point.elevation) : '—';
+    this.$('readout-change').textContent = point.valid ? m.formatChange(point.offset) : '—';
+    this.$('readout-dist').textContent =
+      point.valid && point.distance != null
+        ? `${m.formatNumber(point.distance)}${this._suffix}`
+        : '—';
+    const tag = this.$('readout-tag');
+    tag.textContent = point.valid ? (point.isMeasured ? 'MEASURED' : 'PROJECTED') : 'NO READING';
+    tag.classList.toggle('measured', point.isMeasured);
+  }
+
+  _updateStep() {
+    let step = this.state.step;
+    if (!this.image) step = 1;
+    else if (!this.annotations.origin) step = 2;
+    else if (!this.annotations.known) step = 3;
+    else if (this.state.step < 4) step = 4;
+    this.state.step = step;
+
+    const [tag, text] = STEP_TEXT[step];
+    this.$('hud-step').textContent = tag;
+    this.$('hud-text').innerHTML = text;
+
+    for (const card of document.querySelectorAll('.card[data-step]')) {
+      const s = Number(card.dataset.step);
+      card.classList.toggle('is-active', s === step || (step === 3 && s === 2));
+    }
+  }
+
+  _setDrawer(open) {
+    document.getElementById('app').classList.toggle('drawer-open', open);
+  }
+
+  // ======================================================================
+  // Actions
+  // ======================================================================
+
+  _reset() {
+    const keepPhoto = this.image != null;
+    const message = keepPhoto
+      ? 'Clear the calibration, points and annotations? The photograph stays loaded.'
+      : 'Reset everything?';
+    if (!window.confirm(message)) return;
+
+    this.annotations.clear();
+    this.selectionQueue = [];
+    Object.assign(this.state, {
+      originElevation: 100,
+      knownElevation: 103,
+      horizontalDistance: 40,
+      increment: 1,
+      range: 10,
+      fovDeg: 60,
+      solveMode: 'height',
+      solveValue: 5.5,
+      rulerStyle: 'slope',
+      rungWidth: 10,
+      staffDistance: null,
+      labelMode: 'elevation',
+      step: keepPhoto ? 2 : 1,
+    });
+    this._syncControls();
+    this._recalculate();
+    if (keepPhoto) this._arm('origin');
+    this._toast('Reset.');
+  }
+
+  async _export() {
+    const scene = this._scene();
+    if (!scene || !this.image) {
+      this._toast('Calibrate the photograph before exporting.', true);
+      return;
+    }
+    try {
+      this._toast('Preparing image…');
+      const canvas = this.exporter.compose(scene, { image: this.image });
+      const result = await this.exporter.deliver(canvas, 'elevation-ruler.png');
+      if (result === 'shared') this._toast('Shared.');
+      else if (result === 'downloaded') this._toast('Image saved.');
+      else this._toast('Export cancelled.');
+    } catch (err) {
+      this._toast(err.message ?? 'Export failed.', true);
+    }
+  }
+
+  _toast(message, isError = false) {
+    const el = this.$('toast');
+    el.textContent = message;
+    el.classList.toggle('is-error', isError);
+    el.hidden = false;
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => {
+      el.hidden = true;
+    }, isError ? 4200 : 2400);
+  }
+
+  // ======================================================================
+  // Persistence
+  // ======================================================================
+
+  _persist() {
+    try {
+      const payload = {
+        state: { ...this.state, tool: 'select' },
+        annotations: this.annotations.toJSON(),
+        image: this.imageDataUrl,
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    } catch {
+      // Storage full or unavailable (private browsing). The app still works;
+      // it just will not remember the session.
+    }
+  }
+
+  _restore() {
+    let payload = null;
+    try {
+      payload = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null');
+    } catch {
+      payload = null;
+    }
+    if (!payload) return;
+
+    Object.assign(this.state, payload.state ?? {}, { tool: 'select' });
+    this.model = this._buildModel();
+
+    if (payload.image) {
+      const img = new Image();
+      img.onload = () => {
+        this.image = img;
+        this.imageDataUrl = payload.image;
+        this.view.setImage(img);
+        this.$('empty-state').hidden = true;
+        this.$('hud').hidden = false;
+        this.$('zoom-cluster').hidden = false;
+        this.$('plane-note').hidden = false;
+        this.$('photo-info').textContent = `${img.naturalWidth} × ${img.naturalHeight} px.`;
+        this.annotations.loadJSON(payload.annotations);
+        this._recalculate();
+      };
+      img.onerror = () => {};
+      img.src = payload.image;
+    }
+  }
+}
+
+
+// ======================================================================
+// src/main.js
+// ======================================================================
+// Entry point. Everything else is a module so the projection maths can be
+// tested under Node without a browser anywhere in sight.
+
+
+const start = () => {
+  window.app = new App(document);
+};
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', start, { once: true });
+} else {
+  start();
+}
+
+</script>
+</body>
+</html>

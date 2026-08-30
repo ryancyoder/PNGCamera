@@ -1,0 +1,12 @@
+{
+  "name": "perspective-elevation-ruler",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Line-of-sight vertical perspective elevation ruler for photographs.",
+  "type": "module",
+  "scripts": {
+    "test": "node tests/run.mjs",
+    "build": "node tools/build.mjs",
+    "serve": "python3 -m http.server 8080"
+  }
+}

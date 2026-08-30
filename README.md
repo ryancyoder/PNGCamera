@@ -137,6 +137,18 @@ app's Application Support directory and are only shared when you share them.
 Camera, microphone, speech recognition, and photo-library-add permissions are
 each requested at the point they are first used.
 
+## Perspective Elevation Ruler
+
+`PerspectiveElevationRuler/` holds a separate, self-contained web app: an
+iPad-friendly tool that projects an elevation ruler into a perspective
+photograph. You mark two points whose elevations and separation you know, and
+it solves for the camera and draws elevation increments back onto the picture
+through a real 3D projection, valid along one line of sight.
+
+It shares nothing with the iOS target — no dependencies, no build step — so it
+does not affect the Xcode project. See
+[`PerspectiveElevationRuler/README.md`](PerspectiveElevationRuler/README.md).
+
 ## Planned features
 
 - **Pre-loaded shape masks.** Crop the capture into a predefined shape —

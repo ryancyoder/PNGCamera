@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0b1016">
+<meta name="description" content="A line-of-sight vertical perspective elevation ruler for landscape photographs.">
+<title>Perspective Elevation Ruler</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=&apos;http://www.w3.org/2000/svg&apos; viewBox=&apos;0 0 32 32&apos;%3E%3Crect width=&apos;32&apos; height=&apos;32&apos; rx=&apos;7&apos; fill=&apos;%23111a24&apos;/%3E%3Cg stroke-linecap=&apos;round&apos;%3E%3Cpath d=&apos;M12 9h9&apos; stroke=&apos;%238fe9ff&apos; stroke-width=&apos;1.6&apos;/%3E%3Cpath d=&apos;M9.5 14h13&apos; stroke=&apos;%238fe9ff&apos; stroke-width=&apos;1.8&apos;/%3E%3Cpath d=&apos;M7 19h17&apos; stroke=&apos;%23ffffff&apos; stroke-width=&apos;2&apos;/%3E%3Cpath d=&apos;M4.5 24.5h23&apos; stroke=&apos;%233ddc84&apos; stroke-width=&apos;2.6&apos;/%3E%3C/g%3E%3C/svg%3E">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="app" id="app">
+
+  <!-- ------------------------------------------------------------------ -->
+  <!-- Working canvas                                                      -->
+  <!-- ------------------------------------------------------------------ -->
+  <main class="stage" id="stage">
+    <canvas id="photo-canvas"></canvas>
+
+    <div class="empty" id="empty-state">
+      <div class="empty-inner">
+        <div class="empty-rule" aria-hidden="true">
+          <span></span><span></span><span></span><span></span><span></span>
+        </div>
+        <h1>Perspective Elevation Ruler</h1>
+        <p>
+          Photograph a slope, mark two points you know, and read elevations off the
+          picture along one line of sight.
+        </p>
+        <div class="empty-actions">
+          <button class="btn btn-primary" id="empty-take">Take Photograph</button>
+          <button class="btn" id="empty-choose">Choose Photograph</button>
+        </div>
+        <p class="fine">Visual estimating tool — not a survey instrument.</p>
+      </div>
+    </div>
+
+    <!-- Step guidance, floats over the picture -->
+    <div class="hud hud-top" id="hud" hidden>
+      <div class="hud-step" id="hud-step">STEP 2</div>
+      <div class="hud-text" id="hud-text">Tap the origin.</div>
+      <button class="hud-skip" id="hud-next" hidden>Done</button>
+    </div>
+
+    <!-- Live readout for the selected / last placed point -->
+    <div class="hud hud-readout" id="readout" hidden>
+      <div class="readout-row">
+        <span class="readout-key">Elevation</span>
+        <span class="readout-value" id="readout-elev">—</span>
+      </div>
+      <div class="readout-row">
+        <span class="readout-key">Change</span>
+        <span class="readout-value" id="readout-change">—</span>
+      </div>
+      <div class="readout-row">
+        <span class="readout-key">Distance</span>
+        <span class="readout-value" id="readout-dist">—</span>
+      </div>
+      <div class="readout-tag" id="readout-tag">PROJECTED</div>
+    </div>
+
+    <div class="plane-note" id="plane-note" hidden>
+      Valid along the <strong>line of sight</strong> only — not across the photograph.
+    </div>
+
+    <div class="zoom-cluster" id="zoom-cluster" hidden>
+      <button class="zoom-btn" id="zoom-in" aria-label="Zoom in">+</button>
+      <button class="zoom-btn" id="zoom-out" aria-label="Zoom out">−</button>
+      <button class="zoom-btn" id="zoom-fit" aria-label="Fit photograph">⤢</button>
+    </div>
+
+    <button class="drawer-toggle" id="drawer-toggle" aria-label="Show controls">Controls</button>
+  </main>
+
+  <!-- ------------------------------------------------------------------ -->
+  <!-- Control panel                                                       -->
+  <!-- ------------------------------------------------------------------ -->
+  <aside class="panel" id="panel">
+    <header class="panel-head">
+      <div class="panel-title">
+        <span class="mark" aria-hidden="true"></span>
+        <div>
+          <strong>Perspective Elevation Ruler</strong>
+          <em>Line-of-sight vertical plane</em>
+        </div>
+      </div>
+      <button class="panel-close" id="panel-close" aria-label="Hide controls">✕</button>
+    </header>
+
+    <div class="panel-body">
+
+      <!-- STEP 1 — photograph ------------------------------------------- -->
+      <section class="card" data-step="1">
+        <h2><i>1</i> Photograph</h2>
+        <div class="row row-2">
+          <button class="btn" id="btn-take">Take Photo</button>
+          <button class="btn" id="btn-choose">Choose Photo</button>
+        </div>
+        <p class="hint" id="photo-info">No photograph loaded.</p>
+      </section>
+
+      <!-- STEP 2/3 — reference points ------------------------------------ -->
+      <section class="card" data-step="2">
+        <h2><i>2</i> Known Points</h2>
+
+        <div class="ref" id="ref-origin">
+          <div class="ref-head">
+            <span class="dot dot-origin"></span>
+            <span class="ref-name">Origin</span>
+            <button class="btn btn-tiny" id="btn-set-origin">Tap on photo</button>
+          </div>
+          <label class="field">
+            <span>Origin elevation</span>
+            <input type="text" inputmode="decimal" id="in-origin-elev" value="100.00">
+          </label>
+        </div>
+
+        <div class="ref" id="ref-known">
+          <div class="ref-head">
+            <span class="dot dot-known"></span>
+            <span class="ref-name">Point B</span>
+            <button class="btn btn-tiny" id="btn-set-known">Tap on photo</button>
+          </div>
+          <label class="field">
+            <span>Point B elevation</span>
+            <input type="text" inputmode="decimal" id="in-known-elev" value="103.00">
+          </label>
+          <label class="field">
+            <span>Horizontal distance</span>
+            <input type="text" inputmode="decimal" id="in-distance" value="40.00">
+          </label>
+          <p class="hint">Point B must be the <strong>farther</strong> of the two.</p>
+        </div>
+
+        <div class="derived" id="derived-grade">
+          <span>Elevation change</span><strong id="out-delta">+3.00'</strong>
+          <span>Grade</span><strong id="out-grade">7.5%</strong>
+        </div>
+      </section>
+
+      <!-- STEP 4/5 — calibration ---------------------------------------- -->
+      <section class="card" data-step="4">
+        <h2><i>3</i> Calibrate Perspective</h2>
+        <p class="hint">
+          The line of sight runs through both known points. Drag either point on the
+          photo to re-aim it, then fine-tune below until the ruler sits on the ground.
+        </p>
+
+        <label class="field field-slider">
+          <span>Perspective strength <em id="out-fov">60°</em></span>
+          <input type="range" id="in-fov" min="20" max="110" step="1" value="60">
+          <small>Camera field of view. Wider = stronger convergence.</small>
+        </label>
+
+        <label class="field">
+          <span>Fine-tune by</span>
+          <select id="in-solve-mode">
+            <option value="height">Camera height</option>
+            <option value="distance">Line-of-sight distance</option>
+            <option value="pitch">Vanishing point / horizon</option>
+          </select>
+        </label>
+
+        <label class="field field-slider">
+          <span id="lbl-solve">Camera height <em id="out-solve">5.50'</em></span>
+          <input type="range" id="in-solve" min="0" max="100" step="0.1" value="50">
+          <small id="hint-solve">Both known points stay pinned whatever you choose.</small>
+        </label>
+
+        <div class="derived" id="derived-cal">
+          <span>Camera height</span><strong id="out-cam-h">—</strong>
+          <span>Viewing angle</span><strong id="out-pitch">—</strong>
+          <span>Origin distance</span><strong id="out-origin-d">—</strong>
+          <span>Focal length</span><strong id="out-focal">—</strong>
+        </div>
+        <p class="warn" id="cal-warning" hidden></p>
+      </section>
+
+      <!-- Ruler ---------------------------------------------------------- -->
+      <section class="card" data-step="5">
+        <h2><i>4</i> Elevation Ruler</h2>
+
+        <label class="field">
+          <span>Elevation increment</span>
+          <select id="in-increment">
+            <option value="0.1">0.10</option>
+            <option value="0.25">0.25</option>
+            <option value="0.5">0.50</option>
+            <option value="1" selected>1.00</option>
+            <option value="2">2.00</option>
+          </select>
+        </label>
+
+        <label class="field field-slider">
+          <span>Display range <em id="out-range">±10'</em></span>
+          <input type="range" id="in-range" min="1" max="50" step="1" value="10">
+        </label>
+
+        <label class="field">
+          <span>Ruler style</span>
+          <select id="in-style">
+            <option value="slope" selected>Follow the grade (staircase)</option>
+            <option value="staff">Levelling staff at one distance</option>
+            <option value="both">Both</option>
+          </select>
+        </label>
+
+        <label class="field field-slider" id="wrap-rung-width">
+          <span>Ruler width <em id="out-rung-width">10'</em></span>
+          <input type="range" id="in-rung-width" min="1" max="60" step="1" value="10">
+          <small>How far each increment extends either side of the sight line.</small>
+        </label>
+
+        <label class="field field-slider" id="wrap-staff-distance" hidden>
+          <span>Staff distance <em id="out-staff-distance">—</em></span>
+          <input type="range" id="in-staff-distance" min="1" max="100" step="1" value="50">
+        </label>
+
+        <label class="field">
+          <span>Labels show</span>
+          <select id="in-label-mode">
+            <option value="elevation" selected>Elevation (104.00')</option>
+            <option value="change">Change (+4.00')</option>
+          </select>
+        </label>
+      </section>
+
+      <!-- Display -------------------------------------------------------- -->
+      <section class="card">
+        <h2><i>5</i> Display</h2>
+        <label class="field field-slider">
+          <span>Overlay opacity <em id="out-opacity">100%</em></span>
+          <input type="range" id="in-opacity" min="10" max="100" step="1" value="100">
+        </label>
+        <div class="toggles">
+          <label class="toggle"><input type="checkbox" id="tg-ruler" checked><span>Elevation ruler</span></label>
+          <label class="toggle"><input type="checkbox" id="tg-labels" checked><span>Labels</span></label>
+          <label class="toggle"><input type="checkbox" id="tg-sight" checked><span>Line of sight</span></label>
+          <label class="toggle"><input type="checkbox" id="tg-horizon" checked><span>Horizon</span></label>
+          <label class="toggle"><input type="checkbox" id="tg-crosshair"><span>Crosshair</span></label>
+          <label class="toggle"><input type="checkbox" id="tg-distances"><span>Distances</span></label>
+        </div>
+        <label class="field">
+          <span>Units</span>
+          <select id="in-units">
+            <option value="ft" selected>Feet (')</option>
+            <option value="m">Metres (m)</option>
+          </select>
+        </label>
+      </section>
+
+      <!-- Annotations ---------------------------------------------------- -->
+      <section class="card">
+        <h2><i>6</i> Measurements</h2>
+        <p class="hint">
+          Tap <strong>Add Point</strong>, then tap the photo along the line of sight.
+          Drag any point to update its elevation live.
+        </p>
+        <div class="point-list" id="point-list">
+          <p class="hint empty-list">No measurement points yet.</p>
+        </div>
+        <div class="row row-2">
+          <button class="btn btn-tiny" id="btn-dim-vertical" disabled>Vertical dimension</button>
+          <button class="btn btn-tiny" id="btn-dim-grade" disabled>Slope / grade</button>
+        </div>
+        <div class="row row-2">
+          <button class="btn btn-tiny" id="btn-dim-horizontal" disabled>Horizontal distance</button>
+          <button class="btn btn-tiny btn-danger" id="btn-clear-points">Clear points</button>
+        </div>
+        <p class="hint" id="dim-hint">Select two points to draw a dimension between them.</p>
+      </section>
+
+      <section class="card card-quiet">
+        <h2>Accuracy</h2>
+        <p class="hint">
+          <strong>Measured</strong> values are the elevations you entered.
+          <strong>Projected</strong> values are interpolated from the calibration and are
+          estimates only. Elevations apply along the line of sight shown — an elevation
+          line says nothing about the ground to its left or right. This is not a survey
+          instrument. Recalibrate against a known point whenever you can.
+        </p>
+      </section>
+    </div>
+
+    <!-- Actions ---------------------------------------------------------- -->
+    <footer class="panel-foot">
+      <button class="btn btn-primary" id="btn-calibrate">Calibrate</button>
+      <button class="btn" id="btn-add-point">Add Point</button>
+      <button class="btn" id="btn-reset">Reset</button>
+      <button class="btn btn-accent" id="btn-export">Export</button>
+    </footer>
+  </aside>
+</div>
+
+<!-- Hidden file inputs: `capture` opens the iPad camera directly. -->
+<input type="file" id="file-camera" accept="image/*" capture="environment" hidden>
+<input type="file" id="file-library" accept="image/*" hidden>
+
+<div class="toast" id="toast" hidden></div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
